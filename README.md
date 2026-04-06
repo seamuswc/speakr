@@ -65,6 +65,8 @@ If you have a **blank Ubuntu** server and **`ssh root@YOUR_IP`** works from your
 ```bash
 export OPENAI_API_KEY="sk-..."
 ./scripts/deploy-to-ip.sh YOUR_DROPLET_IP
+# or, if deploy/ip.txt exists in this repo:
+./scripts/deploy-to-ip.sh "$(tr -d '[:space:]' < deploy/ip.txt)"
 ```
 
 That **rsync**s this repo to `/opt/speakr`, writes **`.env`** on the server (with your key), runs **`npm install`**, **systemd**, and **UFW**. Optional: `DOMAIN=app.example.com` for **Caddy + HTTPS**.

@@ -215,6 +215,8 @@ speakr/
 ├── server.js          # Node.js backend — Whisper STT + GPT-4o
 ├── public/
 │   └── index.html     # Mobile web app — mic, UI, on-device TTS
+├── deploy/
+│   └── ip.txt                  # Optional: your droplet IP (for deploy-to-ip.sh)
 ├── scripts/
 │   ├── setup-digitalocean.sh   # Create DO droplet + install (+ optional Caddy)
 │   └── deploy-to-ip.sh         # Deploy to existing Ubuntu box (SSH + IP only)
