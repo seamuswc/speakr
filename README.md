@@ -30,10 +30,30 @@ Open **http://localhost:3000** in your browser.
 |----------|----------|-------------|
 | `OPENAI_API_KEY` | Yes | Your OpenAI secret key |
 | `PORT` | No | Port (default `3000`) |
-| `HOST` | No | Bind address (default `0.0.0.0` — correct for Railway/Docker) |
+| `HOST` | No | Bind address (default `0.0.0.0` — use `127.0.0.1` if a reverse proxy terminates TLS on the same machine) |
 
 Health check for uptime monitors: `GET /api/health` → `{ "ok": true }`.
 
-## Deploy, phone usage, troubleshooting, costs
+## Deploy on DigitalOcean (one script)
 
-See **[SETUP.md](./SETUP.md)** for Railway (or similar), HTTPS, controls (including **dictating your instruction** with the small mic), and fixes for common issues.
+From your Mac (after [installing `doctl`](https://docs.digitalocean.com/reference/doctl/how-to/install/) and adding an [SSH key](https://cloud.digitalocean.com/account/security) to your DO account):
+
+```bash
+export DIGITALOCEAN_ACCESS_TOKEN="dop_v1_..."   # API token: DO → API → Generate token
+export OPENAI_API_KEY="sk-..."
+./scripts/setup-digitalocean.sh
+```
+
+Creates an Ubuntu droplet, installs Node 20, clones this repo, writes `.env`, starts **systemd** `speakr.service`, opens the firewall.
+
+- **HTTP (quick test):** opens `http://YOUR_DROPLET_IP:3000/` — **iOS may block the mic** on plain HTTP.
+- **HTTPS (phone-friendly):** point a domain’s **A record** at the droplet, then:
+
+  ```bash
+  export DOMAIN=app.yourdomain.com
+  ./scripts/setup-digitalocean.sh speakr-https
+  ```
+
+  (Use a **new** droplet name if you already ran the script once, or install Caddy by hand on the existing VM — see **SETUP.md**.)
+
+Full options, firewall notes, and manual steps: **[SETUP.md](./SETUP.md)**.

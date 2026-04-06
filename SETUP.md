@@ -27,8 +27,8 @@ Other person talks → your phone mic picks it up
 
 ## What you need
 
-- A server to run the Node.js backend (Railway recommended — free to start)
-- An OpenAI API key
+- **DigitalOcean** account (or any VPS you SSH into — adapt the script by hand)
+- **OpenAI API key**
 - Your phone
 
 ---
@@ -41,35 +41,66 @@ Other person talks → your phone mic picks it up
 
 ---
 
-## Step 2 — Deploy to Railway (easiest)
+## Step 2 — DigitalOcean: one-shot script (recommended)
 
-Railway gives you a public HTTPS URL your phone can reach.
+On your **Mac or Linux** machine (not on the droplet):
 
-1. Push this repo to GitHub
-2. Go to https://railway.app → sign up → **New Project** → **Deploy from GitHub repo**
-3. Select your repo
-4. Go to your project → **Variables** → add your real key (not the placeholder):
+1. Install **`doctl`**: `brew install doctl` — or see [DigitalOcean’s install guide](https://docs.digitalocean.com/reference/doctl/how-to/install/).
+2. Create a **Personal Access Token** in DigitalOcean (**API** → **Generate new token**) with read+write. Export it:
+   ```bash
+   export DIGITALOCEAN_ACCESS_TOKEN="dop_v1_..."
    ```
-   OPENAI_API_KEY=<paste your sk-... key>
+3. Add your **SSH public key** to DigitalOcean: https://cloud.digitalocean.com/account/security  
+   (The script uses every key in your account unless you set `SSH_KEY_IDS=id1,id2`.)
+4. From a clone of this repo:
+   ```bash
+   export OPENAI_API_KEY="sk-..."
+   ./scripts/setup-digitalocean.sh
    ```
-5. **Start command:** Railway usually detects Node; if you set it manually use **`npm start`**. The server listens on **`PORT`** (Railway sets this automatically).
-6. Optional health check: **`GET /api/health`** returns `{"ok":true}` for uptime monitors.
-7. Go to **Settings → Networking → Generate Domain**
-8. Copy the domain — looks like `speakr-production.up.railway.app`
+   Optional: `./scripts/setup-digitalocean.sh my-droplet-name`
 
-Railway auto-deploys on every git push.
+**What it does:** creates an **Ubuntu 22.04** droplet (default size **`s-1vcpu-1gb`**, region **`nyc1`**), runs **cloud-init** to install **Node 20**, **`git clone`** this app into `/opt/speakr`, **`npm install --omit=dev`**, copies **`.env`**, installs a **`speakr`** **systemd** service, configures **UFW** (SSH + either port **3000** or **80/443**).
+
+**Override defaults (env vars):**
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `REGION` | `nyc1` | Droplet region |
+| `SIZE` | `s-1vcpu-1gb` | Droplet slug |
+| `REPO_URL` | this GitHub repo | Fork or private mirror URL |
+| `SSH_KEY_IDS` | all keys in DO | Comma-separated key IDs |
+| `DOMAIN` | _(empty)_ | If set, installs **Caddy** for **HTTPS** on that hostname |
+
+**HTTPS for your phone (strongly recommended):**
+
+1. Create an **A record** for e.g. `speakr.yourdomain.com` → your droplet’s **public IPv4** (shown when the script finishes).
+2. Run again with a **new** droplet name (or configure Caddy manually on the existing server):
+   ```bash
+   export DOMAIN=speakr.yourdomain.com
+   ./scripts/setup-digitalocean.sh speakr-prod
+   ```
+   The app listens on **127.0.0.1:3000**; **Caddy** terminates TLS on **443** and reverse-proxies to it.
+
+**Useful SSH commands:**
+
+```bash
+ssh root@YOUR_DROPLET_IP
+journalctl -u speakr -f    # app logs
+systemctl restart speakr
+```
+
+**Health check:** `GET https://your-domain/api/health` or `http://IP:3000/api/health` → `{"ok":true}`.
 
 ---
 
 ## Step 3 — Open on your phone
 
-Open your phone's browser and go to:
-```
-https://speakr-production.up.railway.app
-```
-(use your actual Railway domain)
+Use the URL the script prints:
 
-**Important:** Must be HTTPS — browsers block microphone access on plain HTTP. Railway gives you HTTPS automatically.
+- **With `DOMAIN`:** `https://your-domain/`  
+- **Without:** `http://DROPLET_IP:3000/` (mic may be blocked on **iOS** until you use HTTPS)
+
+**Important:** For reliable **microphone** access on phones, prefer **HTTPS** (set `DOMAIN` + DNS, or put another reverse proxy with a real certificate in front of the app).
 
 ---
 
@@ -145,7 +176,7 @@ Then to access from your phone on the same Wi‑Fi:
 1. Find your computer’s LAN IP — **Mac:** System Settings → Network, or run `ipconfig getifaddr en0` (Wi‑Fi) / `en1` if needed. **Windows:** `ipconfig` and look for IPv4.
 2. On your phone, open `http://192.168.x.x:3000` (use your machine’s IP and the port from `.env`, default `3000`).
 
-**iOS:** Safari blocks microphone on plain **HTTP** except in limited cases. Use **HTTPS** (deploy to Railway, or a local HTTPS proxy such as **mkcert** + a small reverse proxy).
+**iOS:** Safari blocks microphone on plain **HTTP** except in limited cases. Use **HTTPS** (DigitalOcean script with `DOMAIN`, or a local **mkcert** + reverse proxy).
 
 ---
 
@@ -168,6 +199,8 @@ speakr/
 ├── server.js          # Node.js backend — Whisper STT + GPT-4o
 ├── public/
 │   └── index.html     # Mobile web app — mic, UI, on-device TTS
+├── scripts/
+│   └── setup-digitalocean.sh   # One-shot DO droplet + systemd (+ optional Caddy)
 ├── package.json
 ├── README.md          # Quick start: install, .env, npm start
 ├── .env.example       # Copy to .env and add your key
