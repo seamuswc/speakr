@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Speakr</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --card: #141414;
+    --border: #222;
+    --green: #22c55e;
+    --green-glow: rgba(34,197,94,0.2);
+    --red: #ef4444;
+    --amber: #f59e0b;
+    --text: #f5f5f5;
+    --dim: #666;
+    --mid: #999;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    height: 100%;
+    overflow: hidden; /* prevent scroll bounce on iOS */
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+    display: flex;
+    flex-direction: column;
+    height: 100dvh; /* dynamic viewport for mobile */
+    padding: env(safe-area-inset-top, 0) 0 env(safe-area-inset-bottom, 0);
+  }
+
+  /* ── Top bar ── */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px 12px;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .logo {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+  .logo span { color: var(--green); }
+
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--dim);
+  }
+
+  .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--dim);
+    transition: background 0.2s, box-shadow 0.2s;
+  }
+  .dot.listening { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .dot.processing { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+  .dot.speaking { background: var(--red); box-shadow: 0 0 8px var(--red); }
+
+  /* ── Scrollable content ── */
+  .content {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 16px 16px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* ── Setup panel ── */
+  .setup {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .field label {
+    display: block;
+    font-size: 10px;
+    color: var(--dim);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  .field-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  .field-head label {
+    margin-bottom: 0;
+  }
+
+  .dictate-btn {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--mid);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+    -webkit-appearance: none;
+  }
+  .dictate-btn svg { width: 18px; height: 18px; }
+  .dictate-btn.active {
+    border-color: var(--green);
+    background: var(--green-glow);
+    color: var(--green);
+  }
+  .mic-btn:disabled,
+  .dictate-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  textarea, select {
+    width: 100%;
+    background: #1a1a1a;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 15px;
+    padding: 11px 13px;
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  textarea {
+    height: 80px;
+    resize: none;
+    line-height: 1.4;
+  }
+
+  textarea::placeholder { color: var(--dim); }
+
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+  }
+
+  /* ── Transcript / response cards ── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+
+  .card-label {
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--dim);
+    padding: 10px 14px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .card-body {
+    padding: 13px 14px;
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--mid);
+    min-height: 52px;
+  }
+
+  .card-body.response {
+    color: var(--text);
+    font-size: 17px;
+    font-weight: 500;
+    line-height: 1.45;
+  }
+
+  .placeholder { color: var(--dim); font-size: 13px; }
+
+  /* ── Error ── */
+  .error {
+    background: #1a0a0a;
+    border: 1px solid #4a1a1a;
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 13px;
+    color: var(--red);
+    display: none;
+  }
+  .error.show { display: block; }
+
+  /* ── Bottom controls ── */
+  .controls {
+    flex-shrink: 0;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+  }
+
+  /* Volume meter */
+  .meter {
+    width: 100%;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .meter-fill {
+    height: 100%;
+    width: 0;
+    background: var(--green);
+    border-radius: 2px;
+    transition: width 0.05s;
+  }
+
+  /* Big mic button */
+  .mic-btn {
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    background: var(--card);
+    color: var(--mid);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    outline: none;
+    transition: all 0.15s;
+    -webkit-appearance: none;
+    position: relative;
+  }
+
+  .mic-btn.active {
+    border-color: var(--green);
+    background: var(--green-glow);
+    color: var(--green);
+    box-shadow: 0 0 0 12px rgba(34,197,94,0.06), 0 0 32px var(--green-glow);
+  }
+
+  .mic-btn.active::after {
+    content: '';
+    position: absolute;
+    inset: -8px;
+    border-radius: 50%;
+    border: 1px solid rgba(34,197,94,0.25);
+    animation: pulse 1.5s ease-out infinite;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(1); opacity: 1; }
+    100% { transform: scale(1.3); opacity: 0; }
+  }
+
+  .mic-btn svg { width: 30px; height: 30px; }
+
+  .mic-hint {
+    font-size: 12px;
+    color: var(--dim);
+    letter-spacing: 0.3px;
+  }
+
+  /* Secondary buttons */
+  .btn-row {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .btn {
+    flex: 1;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--mid);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 10px;
+    cursor: pointer;
+    outline: none;
+    -webkit-appearance: none;
+    transition: all 0.15s;
+    text-align: center;
+  }
+
+  .btn:active { opacity: 0.6; }
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="topbar">
+  <div class="logo">speak<span>r</span></div>
+  <div class="status">
+    <div class="dot" id="dot"></div>
+    <span id="statusText">idle</span>
+  </div>
+</div>
+
+<!-- Scrollable main content -->
+<div class="content">
+
+  <!-- Goal + settings -->
+  <div class="setup">
+    <div class="field">
+      <div class="field-head">
+        <label for="goal">Instruction / Goal</label>
+        <button type="button" class="dictate-btn" id="goalDictateBtn" title="Tap to speak your instruction" aria-label="Speak instruction" aria-pressed="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="9" y="2" width="6" height="12" rx="3"/>
+            <path d="M5 10a7 7 0 0 0 14 0"/>
+            <line x1="12" y1="19" x2="12" y2="22"/>
+            <line x1="8" y1="22" x2="16" y2="22"/>
+          </svg>
+        </button>
+      </div>
+      <textarea id="goal" placeholder="Type here or tap the mic to dictate…"></textarea>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>Tone</label>
+        <select id="tone">
+          <option value="polite">Polite</option>
+          <option value="formal">Formal</option>
+          <option value="assertive">Assertive</option>
+          <option value="casual">Casual</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Language</label>
+        <select id="language">
+          <option value="ja">Japanese</option>
+          <option value="en">English</option>
+          <option value="auto">Auto</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Error -->
+  <div class="error" id="error"></div>
+
+  <!-- They said -->
+  <div class="card">
+    <div class="card-label">They said</div>
+    <div class="card-body" id="transcript">
+      <span class="placeholder">Transcript appears here…</span>
+    </div>
+  </div>
+
+  <!-- AI response -->
+  <div class="card">
+    <div class="card-label">AI response</div>
+    <div class="card-body response" id="response">
+      <span class="placeholder">Response appears here…</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- Fixed bottom controls -->
+<div class="controls">
+  <div class="meter"><div class="meter-fill" id="meter"></div></div>
+
+  <button class="mic-btn" id="micBtn">
+    <!-- Mic icon -->
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="9" y="2" width="6" height="12" rx="3"/>
+      <path d="M5 10a7 7 0 0 0 14 0"/>
+      <line x1="12" y1="19" x2="12" y2="22"/>
+      <line x1="8" y1="22" x2="16" y2="22"/>
+    </svg>
+  </button>
+
+  <div class="mic-hint" id="micHint">Tap to listen</div>
+
+  <div class="btn-row">
+    <button class="btn" id="replayBtn">⟳ Replay</button>
+    <button class="btn" id="stopBtn">◼ Stop</button>
+    <button class="btn" id="resetBtn">↺ Reset</button>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────────
+const sessionId = crypto.randomUUID();
+let recordingEpoch = 0;
+let mainPipelinePending = false;
+let goalFlowBusy = false;
+let mediaRecorder = null;
+let audioChunks   = [];
+let isRecording   = false;
+let stream        = null;
+let goalMediaRecorder = null;
+let goalAudioChunks = [];
+let goalStream = null;
+let isGoalDictating = false;
+let analyserCtx   = null;
+let analyser      = null;
+let animFrame     = null;
+let lastResponse  = "";
+let currentUtterance = null;
+
+// ── DOM ────────────────────────────────────────────────────────────────────────
+const micBtn      = document.getElementById("micBtn");
+const micHint     = document.getElementById("micHint");
+const dot         = document.getElementById("dot");
+const statusText  = document.getElementById("statusText");
+const transcriptEl = document.getElementById("transcript");
+const responseEl  = document.getElementById("response");
+const errorEl     = document.getElementById("error");
+const meterFill   = document.getElementById("meter");
+const replayBtn   = document.getElementById("replayBtn");
+const stopBtn     = document.getElementById("stopBtn");
+const resetBtn    = document.getElementById("resetBtn");
+const goalEl         = document.getElementById("goal");
+const goalDictateBtn = document.getElementById("goalDictateBtn");
+const toneEl         = document.getElementById("tone");
+const langEl         = document.getElementById("language");
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function setStatus(state, label) {
+  dot.className = "dot " + (state || "");
+  statusText.textContent = label;
+}
+
+function showError(msg) {
+  errorEl.textContent = "⚠ " + msg;
+  errorEl.classList.add("show");
+  setTimeout(() => errorEl.classList.remove("show"), 7000);
+}
+
+function setText(el, text) {
+  el.textContent = text;
+}
+
+async function fetchJson(url, options) {
+  const r = await fetch(url, options);
+  const text = await r.text();
+  let data = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      if (!r.ok) throw new Error(text.slice(0, 200) || r.statusText);
+      throw new Error("Invalid response from server");
+    }
+  }
+  if (!r.ok) throw new Error(data.error || r.statusText || "Request failed");
+  return data;
+}
+
+function updateControlLocks() {
+  micBtn.disabled = goalFlowBusy;
+  goalDictateBtn.disabled =
+    isRecording || mainPipelinePending || (goalFlowBusy && !isGoalDictating);
+}
+
+// ── Volume meter ───────────────────────────────────────────────────────────────
+function startMeter(s) {
+  analyserCtx = new AudioContext();
+  const src = analyserCtx.createMediaStreamSource(s);
+  analyser = analyserCtx.createAnalyser();
+  analyser.fftSize = 256;
+  src.connect(analyser);
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  function tick() {
+    analyser.getByteFrequencyData(data);
+    const avg = data.reduce((a, b) => a + b, 0) / data.length;
+    meterFill.style.width = Math.min(avg * 3, 100) + "%";
+    animFrame = requestAnimationFrame(tick);
+  }
+  tick();
+}
+
+function stopMeter() {
+  if (animFrame) cancelAnimationFrame(animFrame);
+  meterFill.style.width = "0%";
+  if (analyserCtx) analyserCtx.close().catch(() => {});
+  analyserCtx = null;
+}
+
+// ── Pick best supported audio format ──────────────────────────────────────────
+function getMimeType() {
+  const types = [
+    "audio/mp4",           // iOS Safari
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+  ];
+  return types.find(t => MediaRecorder.isTypeSupported(t)) || "";
+}
+
+// ── Recording ─────────────────────────────────────────────────────────────────
+async function startRecording() {
+  recordingEpoch++;
+  const myEpoch = recordingEpoch;
+  errorEl.classList.remove("show");
+  try {
+    // echoCancellation OFF — we want to hear the speakerphone output too
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: true,
+        sampleRate: 16000,
+      }
+    });
+  } catch (e) {
+    showError("Mic access denied. Tap the lock icon in your browser and allow microphone.");
+    return;
+  }
+
+  if (typeof MediaRecorder === "undefined") {
+    stream.getTracks().forEach(t => t.stop());
+    showError("Recording is not supported in this browser.");
+    return;
+  }
+
+  audioChunks = [];
+  const mimeType = getMimeType();
+  try {
+    mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+  } catch (e) {
+    stream.getTracks().forEach(t => t.stop());
+    showError("Could not start recorder: " + (e.message || "unknown error"));
+    return;
+  }
+
+  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+  mediaRecorder.onstop = async () => {
+    stopMeter();
+    stream.getTracks().forEach(t => t.stop());
+    if (myEpoch !== recordingEpoch) return;
+    const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || "audio/webm" });
+    if (blob.size < 500) { resetMic(); return; }
+    mainPipelinePending = true;
+    updateControlLocks();
+    try {
+      await pipeline(blob, mediaRecorder.mimeType || "audio/webm", myEpoch);
+    } finally {
+      mainPipelinePending = false;
+      updateControlLocks();
+    }
+  };
+
+  try {
+    mediaRecorder.start(200);
+  } catch (e) {
+    stream.getTracks().forEach(t => t.stop());
+    showError("Could not start recording.");
+    return;
+  }
+  isRecording = true;
+  startMeter(stream);
+
+  micBtn.classList.add("active");
+  micHint.textContent = "Listening… tap to stop";
+  setStatus("listening", "listening");
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
+  isRecording = false;
+  micBtn.classList.remove("active");
+  micHint.textContent = "Processing…";
+  setStatus("processing", "processing");
+}
+
+function resetMic() {
+  micBtn.classList.remove("active");
+  micHint.textContent = "Tap to listen";
+  setStatus("", "idle");
+  updateControlLocks();
+}
+
+// ── Dictate instruction (goal) — same tap-to-stop as call mic ─────────────────
+function finishGoalDictate() {
+  goalFlowBusy = false;
+  isGoalDictating = false;
+  goalDictateBtn.classList.remove("active");
+  goalDictateBtn.setAttribute("aria-pressed", "false");
+  updateControlLocks();
+}
+
+async function startGoalDictate() {
+  if (isRecording || mainPipelinePending || goalFlowBusy) return;
+  errorEl.classList.remove("show");
+  try {
+    goalStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        sampleRate: 16000,
+      },
+    });
+  } catch (e) {
+    showError("Mic access denied. Tap the lock icon in your browser and allow microphone.");
+    return;
+  }
+
+  if (typeof MediaRecorder === "undefined") {
+    goalStream.getTracks().forEach(t => t.stop());
+    showError("Recording is not supported in this browser.");
+    return;
+  }
+
+  goalAudioChunks = [];
+  const mimeType = getMimeType();
+  try {
+    goalMediaRecorder = new MediaRecorder(goalStream, mimeType ? { mimeType } : {});
+  } catch (e) {
+    goalStream.getTracks().forEach(t => t.stop());
+    showError("Could not start recorder: " + (e.message || "unknown error"));
+    return;
+  }
+
+  goalMediaRecorder.ondataavailable = e => { if (e.data.size > 0) goalAudioChunks.push(e.data); };
+  goalMediaRecorder.onstop = async () => {
+    goalStream.getTracks().forEach(t => t.stop());
+    isGoalDictating = false;
+    goalDictateBtn.classList.remove("active");
+    goalDictateBtn.setAttribute("aria-pressed", "false");
+    updateControlLocks();
+
+    const blob = new Blob(goalAudioChunks, { type: goalMediaRecorder.mimeType || "audio/webm" });
+    if (blob.size < 500) {
+      finishGoalDictate();
+      return;
+    }
+    const ext = goalMediaRecorder.mimeType && goalMediaRecorder.mimeType.includes("mp4") ? "mp4" : "webm";
+    try {
+      const fd = new FormData();
+      fd.append("audio", blob, "audio." + ext);
+      fd.append("language", langEl.value);
+      const data = await fetchJson("/api/transcribe", { method: "POST", body: fd });
+      const text = (data.text || "").trim();
+      if (text.length >= 1) {
+        const cur = goalEl.value.trim();
+        goalEl.value = cur ? cur + (cur.endsWith(" ") ? "" : " ") + text : text;
+      }
+    } catch (e) {
+      showError("Instruction dictation failed: " + e.message);
+    } finally {
+      finishGoalDictate();
+    }
+  };
+
+  try {
+    goalMediaRecorder.start(200);
+  } catch (e) {
+    goalStream.getTracks().forEach(t => t.stop());
+    showError("Could not start recording.");
+    return;
+  }
+
+  goalFlowBusy = true;
+  isGoalDictating = true;
+  goalDictateBtn.classList.add("active");
+  goalDictateBtn.setAttribute("aria-pressed", "true");
+  updateControlLocks();
+}
+
+function stopGoalDictate() {
+  if (goalMediaRecorder && goalMediaRecorder.state !== "inactive") goalMediaRecorder.stop();
+}
+
+// ── Full pipeline ─────────────────────────────────────────────────────────────
+async function pipeline(blob, mimeType, epoch) {
+  // 1. Transcribe
+  const fd = new FormData();
+  fd.append("audio", blob, "audio." + (mimeType.includes("mp4") ? "mp4" : "webm"));
+  fd.append("language", langEl.value);
+
+  let transcript, detectedLanguage;
+  try {
+    const data = await fetchJson("/api/transcribe", { method: "POST", body: fd });
+    if (epoch !== recordingEpoch) return;
+    transcript = data.text;
+    detectedLanguage = data.detectedLanguage;
+  } catch (e) {
+    if (epoch !== recordingEpoch) return;
+    showError("Transcription failed: " + e.message);
+    resetMic();
+    return;
+  }
+
+  if (!transcript || transcript.trim().length < 2) { resetMic(); return; }
+  if (epoch !== recordingEpoch) return;
+  setText(transcriptEl, transcript);
+
+  // 2. Generate response
+  let response;
+  try {
+    const data = await fetchJson("/api/respond", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        transcript,
+        goal: goalEl.value.trim(),
+        tone: toneEl.value,
+        language: langEl.value,
+        detectedLanguage,
+      }),
+    });
+    if (epoch !== recordingEpoch) return;
+    response = data.response;
+  } catch (e) {
+    if (epoch !== recordingEpoch) return;
+    showError("Response failed: " + e.message);
+    resetMic();
+    return;
+  }
+
+  if (epoch !== recordingEpoch) return;
+  lastResponse = response;
+  setText(responseEl, response);
+
+  // 3. Speak
+  speak(response, detectedLanguage);
+  resetMic();
+}
+
+// ── TTS — Web Speech API ──────────────────────────────────────────────────────
+// Runs entirely on-device. On iOS: use a Japanese/English Siri voice.
+// No external API needed.
+function speak(text, detectedLang) {
+  if (!window.speechSynthesis) { showError("Text-to-speech not supported in this browser."); return; }
+  window.speechSynthesis.cancel();
+
+  const utter = new SpeechSynthesisUtterance(text);
+  currentUtterance = utter;
+
+  const lang = langEl.value;
+  if (lang === "ja" || detectedLang === "ja") {
+    utter.lang = "ja-JP";
+    utter.rate = 0.92;
+  } else {
+    utter.lang = "en-US";
+    utter.rate = 1.0;
+  }
+  utter.volume = 1.0;
+
+  utter.onstart = () => setStatus("speaking", "speaking");
+  utter.onend = () => setStatus("", "idle");
+  utter.onerror = () => setStatus("", "idle");
+
+  // iOS Safari requires a user gesture before speak() works.
+  // We're already inside a button click chain, so this is fine.
+  window.speechSynthesis.speak(utter);
+}
+
+// ── Button handlers ───────────────────────────────────────────────────────────
+micBtn.addEventListener("click", () => {
+  if (isRecording) stopRecording();
+  else startRecording();
+});
+
+goalDictateBtn.addEventListener("click", () => {
+  if (isGoalDictating) stopGoalDictate();
+  else startGoalDictate();
+});
+
+replayBtn.addEventListener("click", () => {
+  if (lastResponse) speak(lastResponse);
+});
+
+stopBtn.addEventListener("click", () => {
+  window.speechSynthesis?.cancel();
+  setStatus("", "idle");
+});
+
+resetBtn.addEventListener("click", async () => {
+  window.speechSynthesis?.cancel();
+  setText(transcriptEl, "");
+  setText(responseEl, "");
+  lastResponse = "";
+  setStatus("", "idle");
+  await fetch("/api/reset", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId }),
+  }).catch(() => {});
+});
+
+// ── Prevent accidental scroll/bounce ──────────────────────────────────────────
+document.addEventListener("touchmove", e => { if (e.target === document.body) e.preventDefault(); }, { passive: false });
+
+updateControlLocks();
+</script>
+
+</body>
+</html>
