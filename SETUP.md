@@ -2,6 +2,15 @@
 
 The app runs on a server. You open it in your **phone's browser**. Your phone does everything — it listens through its mic and speaks through its speaker. No laptop needed.
 
+**Repo:** https://github.com/seamuswc/speakr — copy/paste server commands are in [README.md](./README.md).
+
+---
+
+## Prerequisites
+
+- **Node.js 20+** (check with `node -v`)
+- **OpenAI API key** with access to Whisper and GPT-4o (billing enabled on your OpenAI account)
+
 ---
 
 ## How it works
@@ -39,14 +48,16 @@ Railway gives you a public HTTPS URL your phone can reach.
 1. Push this repo to GitHub
 2. Go to https://railway.app → sign up → **New Project** → **Deploy from GitHub repo**
 3. Select your repo
-4. Go to your project → **Variables** → add:
+4. Go to your project → **Variables** → add your real key (not the placeholder):
    ```
-   OPENAI_API_KEY = sk-your-key-here
+   OPENAI_API_KEY=<paste your sk-... key>
    ```
-5. Go to **Settings → Networking → Generate Domain**
-6. Copy the domain — looks like `speakr-production.up.railway.app`
+5. **Start command:** Railway usually detects Node; if you set it manually use **`npm start`**. The server listens on **`PORT`** (Railway sets this automatically).
+6. Optional health check: **`GET /api/health`** returns `{"ok":true}` for uptime monitors.
+7. Go to **Settings → Networking → Generate Domain**
+8. Copy the domain — looks like `speakr-production.up.railway.app`
 
-That's it. Railway auto-deploys on every git push.
+Railway auto-deploys on every git push.
 
 ---
 
@@ -83,9 +94,10 @@ https://speakr-production.up.railway.app
 
 ## Controls
 
-| Button | What it does |
+| Control | What it does |
 |--------|-------------|
-| Mic button | Tap to start listening / tap again to stop |
+| **Big mic** (bottom) | Tap to record the **other person** on the call / tap again to stop → transcribe → reply → speak |
+| **Small mic** (next to Instruction) | Tap to **dictate your goal** into the text box / tap again to stop (same Whisper API) |
 | Replay | Plays the last response again |
 | Stop | Cuts off the AI mid-sentence |
 | Reset | Clears memory and starts fresh |
@@ -129,11 +141,11 @@ cp .env.example .env
 npm start
 ```
 
-Then to access from your phone on the same WiFi:
-1. Find your computer's local IP: run `ipconfig` (Windows) or `ifconfig | grep 192` (Mac)
-2. On your phone, go to `http://192.168.x.x:3000`
+Then to access from your phone on the same Wi‑Fi:
+1. Find your computer’s LAN IP — **Mac:** System Settings → Network, or run `ipconfig getifaddr en0` (Wi‑Fi) / `en1` if needed. **Windows:** `ipconfig` and look for IPv4.
+2. On your phone, open `http://192.168.x.x:3000` (use your machine’s IP and the port from `.env`, default `3000`).
 
-Note: Microphone won't work over plain HTTP on iOS. Use a local HTTPS proxy (like `mkcert`) or just deploy to Railway.
+**iOS:** Safari blocks microphone on plain **HTTP** except in limited cases. Use **HTTPS** (deploy to Railway, or a local HTTPS proxy such as **mkcert** + a small reverse proxy).
 
 ---
 
@@ -157,7 +169,8 @@ speakr/
 ├── public/
 │   └── index.html     # Mobile web app — mic, UI, on-device TTS
 ├── package.json
+├── README.md          # Quick start: install, .env, npm start
 ├── .env.example       # Copy to .env and add your key
 ├── .gitignore
-└── SETUP.md           # This file
+└── SETUP.md           # This file — deploy, phone, troubleshooting
 ```

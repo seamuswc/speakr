@@ -433,7 +433,6 @@ let analyserCtx   = null;
 let analyser      = null;
 let animFrame     = null;
 let lastResponse  = "";
-let currentUtterance = null;
 
 // ── DOM ────────────────────────────────────────────────────────────────────────
 const micBtn      = document.getElementById("micBtn");
@@ -702,7 +701,7 @@ function stopGoalDictate() {
 async function pipeline(blob, mimeType, epoch) {
   // 1. Transcribe
   const fd = new FormData();
-  fd.append("audio", blob, "audio." + (mimeType.includes("mp4") ? "mp4" : "webm"));
+  fd.append("audio", blob, "audio." + (mimeType && mimeType.includes("mp4") ? "mp4" : "webm"));
   fd.append("language", langEl.value);
 
   let transcript, detectedLanguage;
@@ -763,7 +762,6 @@ function speak(text, detectedLang) {
   window.speechSynthesis.cancel();
 
   const utter = new SpeechSynthesisUtterance(text);
-  currentUtterance = utter;
 
   const lang = langEl.value;
   if (lang === "ja" || detectedLang === "ja") {

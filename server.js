@@ -12,12 +12,16 @@ import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-if (!process.env.OPENAI_API_KEY) {
-  console.error("\n❌ OPENAI_API_KEY missing. Copy .env.example → .env and add your key.\n");
+const rawKey = (process.env.OPENAI_API_KEY || "").trim();
+const placeholder = /^sk-your-key-here$/i.test(rawKey);
+if (!rawKey || placeholder) {
+  console.error(
+    "\n❌ OPENAI_API_KEY missing or still a placeholder. Copy .env.example → .env and set a real key from https://platform.openai.com/api-keys\n"
+  );
   process.exit(1);
 }
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI({ apiKey: rawKey });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const app = express();
 app.use(express.json());
@@ -113,14 +117,17 @@ app.post("/api/respond", async (req, res) => {
     session.history.push({ role: "assistant", content: response });
     res.json({ response, detectedLanguage });
   } catch (err) {
-    console.error("GPT-4o error:", err.message);
-    res.status(500).json({ error: err.message });
+    session.history.pop();
+    console.error("GPT-4o error:", err);
+    const msg = err?.message || "Model request failed";
+    res.status(500).json({ error: msg });
   }
 });
 
 // ── POST /api/reset ───────────────────────────────────────────────────────────
 app.post("/api/reset", (req, res) => {
-  if (req.body.sessionId) sessions.delete(req.body.sessionId);
+  const sid = req.body?.sessionId;
+  if (sid) sessions.delete(sid);
   res.json({ ok: true });
 });
 
@@ -136,5 +143,14 @@ app.use((err, req, res, next) => {
   next(err);
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`\n✓ Speakr → http://localhost:${PORT}\n`));
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  console.error("Unhandled error:", err);
+  res.status(500).json({ error: "Server error" });
+});
+
+const PORT = Number(process.env.PORT) || 3000;
+const HOST = process.env.HOST || "0.0.0.0";
+app.listen(PORT, HOST, () => {
+  console.log(`\n✓ Speakr → http://localhost:${PORT}\n`);
+});
