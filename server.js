@@ -48,6 +48,16 @@ function whisperPromptFor(language) {
   return "This is a phone call.";
 }
 
+/** Map Whisper verbose `language` to ja | en | th when we recognize it; else undefined. */
+function normalizeDetectedLanguage(raw) {
+  if (raw == null || raw === "") return undefined;
+  const low = String(raw).toLowerCase();
+  if (low === "thai" || low === "th") return "th";
+  if (low === "japanese" || low === "ja") return "ja";
+  if (low === "english" || low === "en") return "en";
+  return undefined;
+}
+
 // ── System prompt ─────────────────────────────────────────────────────────────
 function buildPrompt({ goal, tone, language }) {
   const lang = {
@@ -100,11 +110,8 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
       ...(wPrompt ? { prompt: wPrompt } : {}),
     });
 
-    let detected = result.language ?? "en";
-    const low = String(detected).toLowerCase();
-    if (low === "thai" || low === "th") detected = "th";
-    else if (low === "japanese" || low === "ja") detected = "ja";
-    else if (low === "english" || low === "en") detected = "en";
+    const rawLang = result.language ?? "en";
+    const detected = normalizeDetectedLanguage(rawLang) ?? rawLang;
 
     res.json({ text: result.text?.trim() ?? "", detectedLanguage: detected });
   } catch (err) {
@@ -119,6 +126,10 @@ app.post("/api/respond", async (req, res) => {
   const text = typeof transcript === "string" ? transcript.trim() : "";
   if (!sessionId || !text) return res.status(400).json({ error: "Missing fields" });
 
+  const normDet = normalizeDetectedLanguage(detectedLanguage);
+  const effectiveLang =
+    language && language !== "auto" ? language : normDet || "auto";
+
   if (!sessions.has(sessionId)) sessions.set(sessionId, { history: [], lastActive: Date.now() });
   const session = sessions.get(sessionId);
   session.lastActive = Date.now();
@@ -129,7 +140,7 @@ app.post("/api/respond", async (req, res) => {
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
-        { role: "system", content: buildPrompt({ goal, tone, language: language || detectedLanguage || "auto" }) },
+        { role: "system", content: buildPrompt({ goal, tone, language: effectiveLang }) },
         ...session.history,
       ],
       max_tokens: 100,
@@ -138,7 +149,7 @@ app.post("/api/respond", async (req, res) => {
 
     const response = completion.choices[0]?.message?.content?.trim() ?? "";
     session.history.push({ role: "assistant", content: response });
-    res.json({ response, detectedLanguage });
+    res.json({ response, detectedLanguage: normDet ?? detectedLanguage });
   } catch (err) {
     session.history.pop();
     console.error("GPT-4o error:", err);
@@ -175,5 +186,5 @@ app.use((err, req, res, next) => {
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || "0.0.0.0";
 app.listen(PORT, HOST, () => {
-  console.log(`\n✓ Speakr → http://localhost:${PORT}\n`);
+  console.log(`\n✓ eigobot → http://localhost:${PORT}\n`);
 });
