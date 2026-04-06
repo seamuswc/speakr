@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "deploy:do": "bash scripts/setup-digitalocean.sh"
+    "deploy:do": "bash scripts/setup-digitalocean.sh",
+    "deploy:ip": "bash scripts/deploy-to-ip.sh"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

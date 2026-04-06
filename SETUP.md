@@ -93,6 +93,22 @@ systemctl restart speakr
 
 ---
 
+### Already have a blank server? Deploy with only the IP
+
+You **do not** need `doctl`. On your **Mac/Linux**, from a clone of this repo, **`ssh root@YOUR_IP`** must succeed (use the SSH key you added when creating the droplet).
+
+```bash
+export OPENAI_API_KEY="sk-..."
+./scripts/deploy-to-ip.sh YOUR_PUBLIC_IP
+```
+
+This **uploads** the app to `/opt/speakr`, creates **`.env`** on the server with your key, runs **`npm install`**, installs **systemd** `speakr`, and **UFW**. Optional: `DOMAIN=app.example.com` (DNS **A** → that IP) for **Caddy + HTTPS**.
+
+- Non-root user: `SSH_USER=ubuntu ./scripts/deploy-to-ip.sh IP`
+- Custom key: `SSH_IDENTITY=~/.ssh/id_ed25519 ./scripts/deploy-to-ip.sh IP`
+
+---
+
 ## Step 3 — Open on your phone
 
 Use the URL the script prints:
@@ -200,7 +216,8 @@ speakr/
 ├── public/
 │   └── index.html     # Mobile web app — mic, UI, on-device TTS
 ├── scripts/
-│   └── setup-digitalocean.sh   # One-shot DO droplet + systemd (+ optional Caddy)
+│   ├── setup-digitalocean.sh   # Create DO droplet + install (+ optional Caddy)
+│   └── deploy-to-ip.sh         # Deploy to existing Ubuntu box (SSH + IP only)
 ├── package.json
 ├── README.md          # Quick start: install, .env, npm start
 ├── .env.example       # Copy to .env and add your key

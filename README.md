@@ -57,3 +57,16 @@ Creates an Ubuntu droplet, installs Node 20, clones this repo, writes `.env`, st
   (Use a **new** droplet name if you already ran the script once, or install Caddy by hand on the existing VM — see **SETUP.md**.)
 
 Full options, firewall notes, and manual steps: **[SETUP.md](./SETUP.md)**.
+
+### Already have a droplet? Deploy by IP
+
+If you have a **blank Ubuntu** server and **`ssh root@YOUR_IP`** works from your laptop:
+
+```bash
+export OPENAI_API_KEY="sk-..."
+./scripts/deploy-to-ip.sh YOUR_DROPLET_IP
+```
+
+That **rsync**s this repo to `/opt/speakr`, writes **`.env`** on the server (with your key), runs **`npm install`**, **systemd**, and **UFW**. Optional: `DOMAIN=app.example.com` for **Caddy + HTTPS**.
+
+Same as: `npm run deploy:ip -- YOUR_IP` (note the `--` before the address).
