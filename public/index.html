@@ -5,8 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="eigobot">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Speakr</title>
+<title>eigobot</title>
+<meta name="application-name" content="eigobot">
 <style>
   :root {
     --bg: #0a0a0a;
@@ -54,6 +56,19 @@
     letter-spacing: -0.5px;
   }
   .logo span { color: var(--green); }
+
+  .brand {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: flex-start;
+  }
+  .site-url {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--dim);
+    letter-spacing: 0.02em;
+  }
 
   .status {
     display: flex;
@@ -324,7 +339,10 @@
 
 <!-- Top bar -->
 <div class="topbar">
-  <div class="logo">speak<span>r</span></div>
+  <div class="brand">
+    <div class="logo">eigo<span>bot</span></div>
+    <div class="site-url">eigobot.com</div>
+  </div>
   <div class="status">
     <div class="dot" id="dot"></div>
     <span id="statusText">idle</span>
@@ -365,6 +383,7 @@
         <select id="language">
           <option value="ja">Japanese</option>
           <option value="en">English</option>
+          <option value="th">Thai</option>
           <option value="auto">Auto</option>
         </select>
       </div>
@@ -433,6 +452,7 @@ let analyserCtx   = null;
 let analyser      = null;
 let animFrame     = null;
 let lastResponse  = "";
+let lastDetectedLanguage = "";
 
 // ── DOM ────────────────────────────────────────────────────────────────────────
 const micBtn      = document.getElementById("micBtn");
@@ -747,6 +767,7 @@ async function pipeline(blob, mimeType, epoch) {
 
   if (epoch !== recordingEpoch) return;
   lastResponse = response;
+  lastDetectedLanguage = detectedLanguage || langEl.value || "";
   setText(responseEl, response);
 
   // 3. Speak
@@ -764,7 +785,13 @@ function speak(text, detectedLang) {
   const utter = new SpeechSynthesisUtterance(text);
 
   const lang = langEl.value;
-  if (lang === "ja" || detectedLang === "ja") {
+  const d = String(detectedLang || "").toLowerCase();
+  const isThai = lang === "th" || d === "th" || d === "thai";
+  const isJa = lang === "ja" || d === "ja" || d === "japanese";
+  if (isThai) {
+    utter.lang = "th-TH";
+    utter.rate = 0.9;
+  } else if (isJa) {
     utter.lang = "ja-JP";
     utter.rate = 0.92;
   } else {
@@ -794,7 +821,7 @@ goalDictateBtn.addEventListener("click", () => {
 });
 
 replayBtn.addEventListener("click", () => {
-  if (lastResponse) speak(lastResponse);
+  if (lastResponse) speak(lastResponse, lastDetectedLanguage);
 });
 
 stopBtn.addEventListener("click", () => {
@@ -807,6 +834,7 @@ resetBtn.addEventListener("click", async () => {
   setText(transcriptEl, "");
   setText(responseEl, "");
   lastResponse = "";
+  lastDetectedLanguage = "";
   setStatus("", "idle");
   await fetch("/api/reset", {
     method: "POST",

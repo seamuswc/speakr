@@ -157,12 +157,12 @@ Use the URL the script prints:
 → Tap the lock icon in your browser address bar → allow microphone → refresh
 
 **No voice / silent response**
-→ Your phone needs a Japanese voice installed for Japanese TTS
-→ iPhone: Settings → Accessibility → Spoken Content → Voices → Japanese → download Siri voice
-→ Android: Settings → General Management → Language → Text-to-speech → install Japanese
+→ Your phone needs the right **offline / Siri / Google TTS voice** for the reply language
+→ **Japanese:** iPhone: Settings → Accessibility → Spoken Content → Voices → Japanese → download a Siri voice  
+→ **Thai:** iPhone: same path → **Thai** → download a voice. Android: Text-to-speech → install **Thai**
 
 **AI responds in wrong language**
-→ Set Language to "Japanese" or "English" explicitly instead of "Auto"
+→ Set Language to **Japanese**, **English**, or **Thai** explicitly instead of **Auto** when unsure
 
 **Response takes too long**
 → Normal on slow connections — Whisper + GPT-4o adds ~2–3 seconds

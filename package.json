@@ -1,7 +1,7 @@
 {
   "name": "speakr",
   "version": "1.0.0",
-  "description": "AI call assistant — phone listens and speaks for you",
+  "description": "eigobot — AI call assistant (phone listens and speaks for you)",
   "type": "module",
   "main": "server.js",
   "scripts": {

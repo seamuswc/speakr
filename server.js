@@ -34,12 +34,27 @@ setInterval(() => {
   for (const [id, s] of sessions) if (s.lastActive < cutoff) sessions.delete(id);
 }, 15 * 60 * 1000);
 
+// ── Whisper language / prompt ─────────────────────────────────────────────────
+function whisperLangParam(language) {
+  if (language === "auto" || !language) return undefined;
+  if (language === "ja") return "ja";
+  if (language === "th") return "th";
+  return "en";
+}
+
+function whisperPromptFor(language) {
+  if (language === "ja") return "日本語のビジネス電話です。";
+  if (language === "th") return "การสนทนาทางโทรศัพท์ภาษาไทย";
+  return "This is a phone call.";
+}
+
 // ── System prompt ─────────────────────────────────────────────────────────────
 function buildPrompt({ goal, tone, language }) {
   const lang = {
     ja: "Respond ONLY in Japanese. Use 敬語 (keigo) — 丁寧語 and 謙譲語. This is a Japanese business call.",
     en: "Respond ONLY in English.",
-    auto: "Auto-detect the language spoken and respond in the same language. Use keigo if Japanese.",
+    th: "Respond ONLY in Thai. Use natural, polite spoken Thai appropriate for business or formal phone calls (ภาษาไทยสุภาพ เหมาะกับโทรศัพท์ธุรกิจ). Use ครับ/ค่ะ and polite particles as fits the situation.",
+    auto: "Auto-detect the language spoken and respond in the same language. Use keigo if Japanese; polite Thai (ครับ/ค่ะ) if Thai.",
   }[language] || "Respond in the same language as the speaker.";
 
   const tones = {
@@ -60,7 +75,8 @@ RULES:
 - Never reveal you are an AI unless directly asked.
 - No stage directions, no asterisks, no explanations — only the spoken words.
 - Stay focused on the goal.
-- In Japanese: open with 「はい、承知いたしました」or similar when appropriate.`;
+- In Japanese: open with 「はい、承知いたしました」or similar when appropriate.
+- In Thai: open politely (e.g. ครับ/ค่ะ, สวัสดีครับ/ค่ะ) when appropriate for the call.`;
 }
 
 // ── POST /api/transcribe ──────────────────────────────────────────────────────
@@ -74,16 +90,23 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
       type: req.file.mimetype || "audio/webm",
     });
 
+    const wPrompt = language === "auto" ? undefined : whisperPromptFor(language);
     const result = await openai.audio.transcriptions.create({
       model: "whisper-1",
       file,
-      language: language === "auto" ? undefined : language === "ja" ? "ja" : "en",
+      language: whisperLangParam(language),
       response_format: "verbose_json",
       temperature: 0,
-      prompt: language === "ja" ? "日本語のビジネス電話です。" : "This is a phone call.",
+      ...(wPrompt ? { prompt: wPrompt } : {}),
     });
 
-    res.json({ text: result.text?.trim() ?? "", detectedLanguage: result.language ?? "en" });
+    let detected = result.language ?? "en";
+    const low = String(detected).toLowerCase();
+    if (low === "thai" || low === "th") detected = "th";
+    else if (low === "japanese" || low === "ja") detected = "ja";
+    else if (low === "english" || low === "en") detected = "en";
+
+    res.json({ text: result.text?.trim() ?? "", detectedLanguage: detected });
   } catch (err) {
     console.error("Whisper error:", err.message);
     res.status(500).json({ error: err.message });
