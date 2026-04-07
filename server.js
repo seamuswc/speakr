@@ -212,6 +212,66 @@ app.post("/api/respond", async (req, res) => {
   }
 });
 
+// ── POST /api/outcome — summarize call toward goal in “your language” (ja|en|th) ─
+function buildOutcomePrompt({ goal, language }) {
+  const langRule = {
+    ja: "出力は日本語のみ。",
+    en: "Write ONLY in English.",
+    th: "เขียนเป็นภาษาไทยเท่านั้น",
+  }[language] || "Write ONLY in English.";
+
+  return `You write a short outcome summary for someone who held a live phone call with help from an AI.
+
+USER GOAL / INSTRUCTION (may be in any language): ${goal || "Not specified"}
+
+${langRule}
+
+Write 2–4 short sentences:
+- Progress toward the goal (or lack of it).
+- What is still open or should be done next.
+- Any fact worth remembering.
+
+Summarize in your own words. Do not translate the dialogue line-by-line; synthesize. No roleplay or markdown.`;
+}
+
+app.post("/api/outcome", async (req, res) => {
+  const { goal, language, turns } = req.body || {};
+  if (!Array.isArray(turns) || turns.length === 0) {
+    return res.status(400).json({ error: "No conversation turns" });
+  }
+  const lang = ["ja", "en", "th"].includes(language) ? language : "en";
+
+  const lines = turns
+    .map((t, i) => {
+      const c = String(t.caller ?? t.them ?? "").trim();
+      const r = String(t.receiver ?? t.ai ?? "").trim();
+      return `Turn ${i + 1}\nOther party (caller): ${c}\nSuggested line for user to say (receiver): ${r}`;
+    })
+    .join("\n\n");
+
+  const messages = [
+    { role: "system", content: buildOutcomePrompt({ goal, language: lang }) },
+    {
+      role: "user",
+      content: `CALL LOG (synthesize; do not quote verbatim):\n\n${lines}`,
+    },
+  ];
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages,
+      max_tokens: 220,
+      temperature: 0.35,
+    });
+    const outcome = completion.choices[0]?.message?.content?.trim() ?? "";
+    res.json({ outcome });
+  } catch (err) {
+    console.error("Outcome error:", err.message);
+    res.status(500).json({ error: err?.message || "Outcome failed" });
+  }
+});
+
 // ── POST /api/reset ───────────────────────────────────────────────────────────
 app.post("/api/reset", (req, res) => {
   const sid = req.body?.sessionId;

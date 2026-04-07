@@ -308,7 +308,11 @@
     padding: 12px 14px 14px;
     background: var(--green-glow);
   }
-  .convo-outcome.is-empty { display: none; }
+  .convo-outcome.waiting .convo-outcome-text {
+    color: var(--dim);
+    font-weight: 400;
+    font-size: 14px;
+  }
   .convo-outcome-label {
     font-size: 10px;
     color: var(--dim);
@@ -471,6 +475,15 @@
       <textarea id="goal" placeholder="指示（日本語でも英語でもOK） / Instruction (any language)"></textarea>
     </div>
     <div class="field">
+      <label>あなたの言語（会話の見出し・通話後の結果） / Your language (labels &amp; outcome)</label>
+      <input type="hidden" id="instructionLang" value="en" />
+      <div class="lang-row" id="instructionLangRow" role="group" aria-label="Your language">
+        <button type="button" class="lang-btn" data-lang="ja" aria-pressed="false">日本語</button>
+        <button type="button" class="lang-btn active" data-lang="en" aria-pressed="true">English</button>
+        <button type="button" class="lang-btn" data-lang="th" aria-pressed="false">ไทย</button>
+      </div>
+    </div>
+    <div class="field">
       <label>相手の言語 / Caller language</label>
       <input type="hidden" id="callLang" value="ja" />
       <div class="lang-row" id="callLangRow" role="group" aria-label="相手の言語 / Caller language">
@@ -516,8 +529,8 @@
       <div class="convo-scroll" id="convoLog" aria-live="polite">
         <span class="placeholder" id="convoPlaceholder">やり取りがここに積み上がります / Your call builds here…</span>
       </div>
-      <div class="convo-outcome is-empty" id="convoOutcome" aria-label="いまの結果 / Current outcome">
-        <div class="convo-outcome-label">いまの結果 / Current outcome</div>
+      <div class="convo-outcome waiting" id="convoOutcome">
+        <div class="convo-outcome-label" id="convoOutcomeLabel"></div>
         <div class="convo-outcome-text" id="convoOutcomeText"></div>
       </div>
     </div>
@@ -617,6 +630,96 @@ const goalDictateBtn = document.getElementById("goalDictateBtn");
 const toneEl         = document.getElementById("tone");
 const callLangEl = document.getElementById("callLang");
 const callLangRow = document.getElementById("callLangRow");
+const instructionLangEl = document.getElementById("instructionLang");
+const instructionLangRow = document.getElementById("instructionLangRow");
+const convoOutcomeLabel = document.getElementById("convoOutcomeLabel");
+
+/** Full call log for outcome API */
+let convoTurns = [];
+let outcomeFromApi = false;
+
+function setInstructionLang(code) {
+  instructionLangEl.value = code;
+  instructionLangRow.querySelectorAll(".lang-btn").forEach((btn) => {
+    const on = btn.dataset.lang === code;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+  refreshOutcomeStripIfWaiting();
+}
+
+/** While no API outcome yet, keep hint in sync with languages / turn count. */
+function refreshOutcomeStripIfWaiting() {
+  if (outcomeFromApi) {
+    convoOutcomeLabel.textContent = outcomeTitleNative();
+    return;
+  }
+  convoOutcome.classList.add("waiting");
+  convoOutcomeLabel.textContent = outcomeTitleNative();
+  convoOutcomeText.textContent = convoTurns.length ? outcomeWaitingBody() : outcomeEmptyBody();
+}
+
+/** Caller column: label in caller’s language (no translation). */
+function callerSideLabel() {
+  switch (callLangEl.value) {
+    case "ja":
+      return "相手";
+    case "th":
+      return "อีกฝ่าย";
+    default:
+      return "Caller";
+  }
+}
+
+/** Your line / AI suggestion column: label in your (instruction) language only. */
+function receiverSideLabel() {
+  switch (instructionLangEl.value) {
+    case "ja":
+      return "あなたの返答";
+    case "th":
+      return "คำตอบของคุณ";
+    default:
+      return "Your reply";
+  }
+}
+
+function outcomeTitleNative() {
+  switch (instructionLangEl.value) {
+    case "ja":
+      return "結果";
+    case "th":
+      return "สรุปผล";
+    default:
+      return "Outcome";
+  }
+}
+
+function outcomeWaitingBody() {
+  switch (instructionLangEl.value) {
+    case "ja":
+      return "ライブ通話を終了（待機中にマイクをタップ）すると、指示に対する結果がここに書かれます。";
+    case "th":
+      return "เมื่อจบการโทรแบบสด (แตะไมค์ตอนรอ) สรุปผลตามเป้าหมายจะแสดงที่นี่";
+    default:
+      return "End the live call (tap the mic while idle) to write the goal outcome here.";
+  }
+}
+
+function outcomeEmptyBody() {
+  switch (instructionLangEl.value) {
+    case "ja":
+      return "まだ会話がありません。";
+    case "th":
+      return "ยังไม่มีบทสนทนา";
+    default:
+      return "No conversation yet.";
+  }
+}
+
+function syncOutcomeWaitingUI() {
+  outcomeFromApi = false;
+  refreshOutcomeStripIfWaiting();
+}
 
 function setCallLang(code) {
   callLangEl.value = code;
@@ -690,7 +793,7 @@ function appendConvoTurn(themText, aiText) {
   rowThem.className = "convo-line convo-them";
   const labThem = document.createElement("span");
   labThem.className = "convo-tag";
-  labThem.textContent = "相手 / Them";
+  labThem.textContent = callerSideLabel();
   const txtThem = document.createElement("p");
   txtThem.className = "convo-msg";
   txtThem.textContent = them || "—";
@@ -701,7 +804,7 @@ function appendConvoTurn(themText, aiText) {
   rowAi.className = "convo-line convo-ai";
   const labAi = document.createElement("span");
   labAi.className = "convo-tag";
-  labAi.textContent = "AI";
+  labAi.textContent = receiverSideLabel();
   const txtAi = document.createElement("p");
   txtAi.className = "convo-msg";
   txtAi.textContent = ai || "—";
@@ -713,21 +816,62 @@ function appendConvoTurn(themText, aiText) {
   convoLog.appendChild(turn);
   convoLog.scrollTop = convoLog.scrollHeight;
 
-  if (ai) {
-    convoOutcomeText.textContent = ai;
-    convoOutcome.classList.remove("is-empty");
-  }
+  convoTurns.push({ caller: them, receiver: ai });
+  refreshOutcomeStripIfWaiting();
 }
 
 function clearConvoLog() {
+  convoTurns = [];
   convoLog.innerHTML = "";
   const ph = document.createElement("span");
   ph.className = "placeholder";
   ph.id = "convoPlaceholder";
   ph.textContent = "やり取りがここに積み上がります / Your call builds here…";
   convoLog.appendChild(ph);
-  convoOutcomeText.textContent = "";
-  convoOutcome.classList.add("is-empty");
+  syncOutcomeWaitingUI();
+}
+
+async function fetchCallOutcome() {
+  convoOutcome.classList.add("waiting");
+  convoOutcomeLabel.textContent = outcomeTitleNative();
+  if (!convoTurns.length) {
+    outcomeFromApi = false;
+    convoOutcomeText.textContent = outcomeEmptyBody();
+    return;
+  }
+  const loading =
+    instructionLangEl.value === "ja"
+      ? "作成中…"
+      : instructionLangEl.value === "th"
+        ? "กำลังสร้าง…"
+        : "Writing…";
+  convoOutcomeText.textContent = loading;
+  try {
+    const data = await fetchJson("/api/outcome", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        goal: goalEl.value.trim() || "(none)",
+        language: instructionLangEl.value,
+        turns: convoTurns,
+      }),
+    });
+    convoOutcome.classList.remove("waiting");
+    convoOutcomeText.textContent = (data.outcome || "").trim() || "—";
+    outcomeFromApi = true;
+  } catch (e) {
+    outcomeFromApi = false;
+    convoOutcome.classList.add("waiting");
+    convoOutcomeText.textContent =
+      (instructionLangEl.value === "ja"
+        ? "結果を取得できませんでした: "
+        : instructionLangEl.value === "th"
+          ? "สรุปไม่สำเร็จ: "
+          : "Could not get outcome: ") + e.message;
+    showError(
+      "結果の取得に失敗しました / Outcome failed: " + e.message
+    );
+  }
 }
 
 async function fetchJson(url, options) {
@@ -1358,6 +1502,7 @@ micBtn.addEventListener("click", () => {
     liveCallUserTapPending = false;
     updateIdleMicHint();
     setStatus("", "待機中 / Idle");
+    void fetchCallOutcome();
     return;
   }
 
@@ -1375,6 +1520,13 @@ callLangRow.addEventListener("click", (e) => {
   const btn = e.target.closest(".lang-btn");
   if (!btn || !btn.dataset.lang) return;
   setCallLang(btn.dataset.lang);
+  refreshOutcomeStripIfWaiting();
+});
+
+instructionLangRow.addEventListener("click", (e) => {
+  const btn = e.target.closest(".lang-btn");
+  if (!btn || !btn.dataset.lang) return;
+  setInstructionLang(btn.dataset.lang);
 });
 
 resetBtn.addEventListener("click", async () => {
@@ -1403,6 +1555,8 @@ document.addEventListener("touchmove", e => { if (e.target === document.body) e.
 
 updateControlLocks();
 setCallLang(callLangEl.value || "ja");
+setInstructionLang(instructionLangEl.value || "en");
+syncOutcomeWaitingUI();
 updateIdleMicHint();
 updateControlsHeightVar();
 window.addEventListener("resize", updateControlsHeightVar, { passive: true });
