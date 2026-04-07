@@ -122,7 +122,7 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
 
 // ── POST /api/respond ─────────────────────────────────────────────────────────
 app.post("/api/respond", async (req, res) => {
-  const { sessionId, transcript, goal, tone, language, detectedLanguage } = req.body;
+  const { sessionId, transcript, goal, tone, language, detectedLanguage, stream: streamMode } = req.body;
   const text = typeof transcript === "string" ? transcript.trim() : "";
   if (!sessionId || !text) return res.status(400).json({ error: "Missing fields" });
 
@@ -136,13 +136,59 @@ app.post("/api/respond", async (req, res) => {
   session.history.push({ role: "user", content: text });
   if (session.history.length > 20) session.history = session.history.slice(-20);
 
+  const messages = [
+    { role: "system", content: buildPrompt({ goal, tone, language: effectiveLang }) },
+    ...session.history,
+  ];
+
+  if (streamMode === true) {
+    res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("X-Accel-Buffering", "no");
+    if (typeof res.flushHeaders === "function") res.flushHeaders();
+    try {
+      const streamRes = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages,
+        max_tokens: 100,
+        temperature: 0.7,
+        stream: true,
+      });
+      let full = "";
+      for await (const chunk of streamRes) {
+        const delta = chunk.choices[0]?.delta?.content ?? "";
+        if (delta) {
+          full += delta;
+          res.write(JSON.stringify({ delta }) + "\n");
+        }
+      }
+      const trimmed = full.trim();
+      session.history.push({ role: "assistant", content: trimmed });
+      res.write(
+        JSON.stringify({
+          done: true,
+          response: trimmed,
+          detectedLanguage: normDet ?? detectedLanguage,
+        }) + "\n"
+      );
+      res.end();
+    } catch (err) {
+      session.history.pop();
+      console.error("GPT-4o stream error:", err);
+      try {
+        res.write(JSON.stringify({ error: err?.message || "Model request failed" }) + "\n");
+      } catch {
+        /* ignore */
+      }
+      res.end();
+    }
+    return;
+  }
+
   try {
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
-      messages: [
-        { role: "system", content: buildPrompt({ goal, tone, language: effectiveLang }) },
-        ...session.history,
-      ],
+      messages,
       max_tokens: 100,
       temperature: 0.7,
     });

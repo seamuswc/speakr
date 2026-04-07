@@ -438,8 +438,7 @@
   <div class="mic-hint" id="micHint">Tap to listen</div>
 
   <div class="btn-row">
-    <button class="btn" id="replayBtn">⟳ Replay</button>
-    <button class="btn" id="stopBtn">◼ Stop</button>
+    <button class="btn" id="replayBtn">🔊 Hear</button>
     <button class="btn" id="resetBtn">↺ Reset</button>
   </div>
 </div>
@@ -464,6 +463,15 @@ let animFrame     = null;
 let lastResponse  = "";
 let lastDetectedLanguage = "";
 
+/** Auto-stop recording after speech + silence (VAD) */
+const SILENCE_MS = 1000;
+const MIN_RECORD_MS = 1400;
+const LOUD_THRESH = 6;
+let recordStartAt = 0;
+let hadSound = false;
+let lastSoundTime = 0;
+let vadFired = false;
+
 const isIOS =
   /iPad|iPhone|iPod/.test(navigator.userAgent) ||
   (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
@@ -478,7 +486,6 @@ const responseEl  = document.getElementById("response");
 const errorEl     = document.getElementById("error");
 const meterFill   = document.getElementById("meter");
 const replayBtn   = document.getElementById("replayBtn");
-const stopBtn     = document.getElementById("stopBtn");
 const resetBtn    = document.getElementById("resetBtn");
 const goalEl         = document.getElementById("goal");
 const goalDictateBtn = document.getElementById("goalDictateBtn");
@@ -515,6 +522,78 @@ async function fetchJson(url, options) {
   }
   if (!r.ok) throw new Error(data.error || r.statusText || "Request failed");
   return data;
+}
+
+/** Stream GPT reply as NDJSON; calls onDelta for each chunk. Aborts if epoch !== recordingEpoch. */
+async function fetchRespondStream(body, epoch, onDelta) {
+  const r = await fetch("/api/respond", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...body, stream: true }),
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    let errMsg = "Request failed";
+    try {
+      const j = JSON.parse(text);
+      errMsg = j.error || errMsg;
+    } catch {
+      errMsg = text.slice(0, 200) || r.statusText;
+    }
+    throw new Error(errMsg);
+  }
+  if (!r.body) throw new Error("Streaming not supported");
+
+  const reader = r.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let fullResponse = "";
+  let outDetected = body.detectedLanguage;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (epoch !== recordingEpoch) {
+      try {
+        await reader.cancel();
+      } catch {
+        /* ignore */
+      }
+      throw new DOMException("Aborted", "AbortError");
+    }
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let obj;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (obj.error) throw new Error(obj.error);
+      if (obj.delta) {
+        fullResponse += obj.delta;
+        onDelta(obj.delta, fullResponse);
+      }
+      if (obj.done === true) {
+        if (typeof obj.response === "string") fullResponse = obj.response;
+        if (obj.detectedLanguage != null) outDetected = obj.detectedLanguage;
+      }
+    }
+  }
+  if (buf.trim()) {
+    try {
+      const obj = JSON.parse(buf);
+      if (obj.error) throw new Error(obj.error);
+      if (obj.done === true && typeof obj.response === "string") fullResponse = obj.response;
+      if (obj.detectedLanguage != null) outDetected = obj.detectedLanguage;
+    } catch (e) {
+      if (!(e instanceof SyntaxError)) throw e;
+    }
+  }
+  return { response: fullResponse.trim(), detectedLanguage: outDetected };
 }
 
 function updateControlLocks() {
@@ -555,8 +634,13 @@ function pickVoiceForUtter(langCode) {
   return byLang || null;
 }
 
-// ── Volume meter ───────────────────────────────────────────────────────────────
+// ── Volume meter + silence auto-stop (VAD) ────────────────────────────────────
 function startMeter(s) {
+  vadFired = false;
+  hadSound = false;
+  lastSoundTime = 0;
+  recordStartAt = Date.now();
+
   analyserCtx = new AudioContext();
   const src = analyserCtx.createMediaStreamSource(s);
   analyser = analyserCtx.createAnalyser();
@@ -567,6 +651,29 @@ function startMeter(s) {
     analyser.getByteFrequencyData(data);
     const avg = data.reduce((a, b) => a + b, 0) / data.length;
     meterFill.style.width = Math.min(avg * 3, 100) + "%";
+
+    if (
+      isRecording &&
+      !vadFired &&
+      mediaRecorder &&
+      mediaRecorder.state === "recording"
+    ) {
+      if (avg > LOUD_THRESH) {
+        hadSound = true;
+        lastSoundTime = Date.now();
+      }
+      const now = Date.now();
+      if (
+        hadSound &&
+        lastSoundTime &&
+        now - lastSoundTime >= SILENCE_MS &&
+        now - recordStartAt >= MIN_RECORD_MS
+      ) {
+        vadFired = true;
+        stopRecording();
+        return;
+      }
+    }
     animFrame = requestAnimationFrame(tick);
   }
   tick();
@@ -653,7 +760,7 @@ async function startRecording() {
   startMeter(stream);
 
   micBtn.classList.add("active");
-  micHint.textContent = "Listening… tap to stop";
+  micHint.textContent = "Listening… stops when quiet, or tap to stop";
   setStatus("listening", "listening");
 }
 
@@ -787,36 +894,48 @@ async function pipeline(blob, mimeType, epoch) {
   if (epoch !== recordingEpoch) return;
   setText(transcriptEl, transcript);
 
-  // 2. Generate response
+  // 2. Generate response (streamed — text appears as the model types)
   let response;
+  setText(responseEl, "");
+  setStatus("processing", "responding");
   try {
-    const data = await fetchJson("/api/respond", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const result = await fetchRespondStream(
+      {
         sessionId,
         transcript,
         goal: goalEl.value.trim(),
         tone: toneEl.value,
         language: langEl.value,
         detectedLanguage,
-      }),
-    });
+      },
+      epoch,
+      (_d, full) => {
+        if (epoch !== recordingEpoch) return;
+        setText(responseEl, full);
+      }
+    );
     if (epoch !== recordingEpoch) return;
-    response = data.response;
+    response = result.response;
+    detectedLanguage = result.detectedLanguage || detectedLanguage;
   } catch (e) {
     if (epoch !== recordingEpoch) return;
+    if (e && (e.name === "AbortError" || e.message === "Aborted")) return;
     showError("Response failed: " + e.message);
     resetMic();
     return;
   }
 
   if (epoch !== recordingEpoch) return;
+  if (!response || !response.trim()) {
+    showError("No reply from the model.");
+    resetMic();
+    return;
+  }
   lastResponse = response;
   lastDetectedLanguage = detectedLanguage || langEl.value || "";
   setText(responseEl, response);
 
-  // 3. Speak (async — iOS often blocks speech unless user later taps ⟳ Replay)
+  // 3. Speak (async — iOS often blocks speech unless user later taps Hear)
   try {
     await speak(response, detectedLanguage);
   } catch (e) {
@@ -825,15 +944,15 @@ async function pipeline(blob, mimeType, epoch) {
   resetMic();
   if (isIOS) {
     replayBtn.classList.add("replay-pulse");
-    micHint.textContent = "Tap ⟳ Replay if you didn’t hear the reply";
+    micHint.textContent = "Tap Hear if you didn’t hear the reply";
     setTimeout(() => replayBtn.classList.remove("replay-pulse"), 4000);
     setTimeout(() => {
-      if (!isRecording && micHint.textContent.includes("Replay")) micHint.textContent = "Tap to listen";
+      if (!isRecording && micHint.textContent.includes("Hear")) micHint.textContent = "Tap to listen";
     }, 10000);
   }
 }
 
-// ── TTS — Web Speech API (on-device). iOS often blocks auto-speak after fetch() — use ⟳ Replay.
+// ── TTS — Web Speech API (on-device). iOS often blocks auto-speak after fetch() — use Hear.
 async function speak(text, detectedLang) {
   if (!window.speechSynthesis) {
     showError("Text-to-speech not supported in this browser.");
@@ -878,13 +997,13 @@ async function speak(text, detectedLang) {
     };
     utter.onerror = () => {
       setStatus("", "idle");
-      showError("Speech didn’t play — tap ⟳ Replay (iOS often blocks auto-speak after loading).");
+      showError("Speech didn’t play — tap Hear (iOS often blocks auto-speak after loading).");
       resolve();
     };
     try {
       speechSynthesis.speak(utter);
     } catch (e) {
-      showError("Speech failed — tap ⟳ Replay.");
+      showError("Speech failed — tap Hear.");
       resolve();
     }
   });
@@ -892,8 +1011,15 @@ async function speak(text, detectedLang) {
 
 // ── Button handlers ───────────────────────────────────────────────────────────
 micBtn.addEventListener("click", () => {
-  if (isRecording) stopRecording();
-  else startRecording();
+  if (isRecording) {
+    stopRecording();
+    return;
+  }
+  if (window.speechSynthesis?.speaking) {
+    speechSynthesis.cancel();
+    setStatus("", "idle");
+  }
+  startRecording();
 });
 
 goalDictateBtn.addEventListener("click", () => {
@@ -903,11 +1029,6 @@ goalDictateBtn.addEventListener("click", () => {
 
 replayBtn.addEventListener("click", () => {
   if (lastResponse) void speak(lastResponse, lastDetectedLanguage);
-});
-
-stopBtn.addEventListener("click", () => {
-  window.speechSynthesis?.cancel();
-  setStatus("", "idle");
 });
 
 resetBtn.addEventListener("click", async () => {
