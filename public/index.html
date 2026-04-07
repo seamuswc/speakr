@@ -564,6 +564,10 @@ let animFrame     = null;
 let lastResponse  = "";
 let lastDetectedLanguage = "";
 
+/** OpenAI TTS playback (cancel when mic tapped) */
+let serverTtsAudio = null;
+let serverTtsObjectUrl = null;
+
 /** One mic tap starts listen→reply→listen loop until tap again (idle) or Reset */
 let liveCallMode = false;
 let liveCallTimer = null;
@@ -572,13 +576,17 @@ let liveCallUserTapPending = false;
 
 /**
  * VAD: recording stops only after we hear speech, then silence for a while.
- * Continuous talk (even many minutes) does NOT auto-stop — each loud frame refreshes the timer.
+ * Call mic uses smoothed level so brief spikes (keyboard clicks) don’t reset the silence tail.
  */
 const LOUD_THRESH = 6;
 
-/** Big mic (phone call): allow natural gaps between sentences */
-const CALL_SILENCE_MS = 3200;
-const CALL_MIN_RECORD_MS = 2000;
+/** Big mic (phone call): shorter tail; smooth energy avoids clicky false “still talking” */
+const CALL_SILENCE_MS = 1000;
+const CALL_MIN_RECORD_MS = 1800;
+const CALL_VAD_SMOOTH_DECAY = 0.89;
+const CALL_VAD_SMOOTH_ATTACK = 0.11;
+/** Min smoothed level to count as speech (raw byte-avg spikes from clicks stay below this). */
+const CALL_VAD_SMOOTH_THRESH = 13;
 
 /** Instruction mic: shorter tail so quick dictate still feels snappy */
 const GOAL_SILENCE_MS = 1100;
@@ -737,7 +745,7 @@ function scheduleLiveCallRestart(delayMs = 550) {
     liveCallTimer = null;
     if (!liveCallMode) return;
     if (mainPipelinePending || goalFlowBusy || isRecording) return;
-    if (window.speechSynthesis?.speaking) {
+    if (isTtsPlaying()) {
       scheduleLiveCallRestart(220);
       return;
     }
@@ -975,15 +983,52 @@ function ensureSpeechVoices() {
   });
 }
 
-/** Pick a device voice so Thai/Japanese aren’t silent when default is wrong. */
+function stopServerTts() {
+  if (serverTtsAudio) {
+    try {
+      serverTtsAudio.pause();
+      serverTtsAudio.currentTime = 0;
+    } catch {
+      /* ignore */
+    }
+    serverTtsAudio = null;
+  }
+  if (serverTtsObjectUrl) {
+    try {
+      URL.revokeObjectURL(serverTtsObjectUrl);
+    } catch {
+      /* ignore */
+    }
+    serverTtsObjectUrl = null;
+  }
+}
+
+function isTtsPlaying() {
+  if (serverTtsAudio) return true;
+  return Boolean(window.speechSynthesis?.speaking);
+}
+
+/** Fallback: pick nicer on-device voices when OpenAI TTS isn’t used. */
 function pickVoiceForUtter(langCode) {
   const voices = speechSynthesis.getVoices();
   if (!voices.length) return null;
   const want = (langCode || "en").toLowerCase().slice(0, 2);
-  const byLang =
-    voices.find((v) => (v.lang || "").toLowerCase().startsWith(want)) ||
-    voices.find((v) => (v.lang || "").toLowerCase().includes(want));
-  return byLang || null;
+  const pool = voices.filter((v) => {
+    const L = (v.lang || "").toLowerCase();
+    return L.startsWith(want) || L.includes(want);
+  });
+  if (!pool.length) {
+    return (
+      voices.find((v) => (v.lang || "").toLowerCase().startsWith(want)) ||
+      voices.find((v) => (v.lang || "").toLowerCase().includes(want)) ||
+      null
+    );
+  }
+  const n = (v) => v.name.toLowerCase();
+  const pick = (sub) => pool.find((v) => n(v).includes(sub));
+  if (want === "ja") return pick("kyoko") || pick("otoya") || pool[0];
+  if (want === "th") return pick("kanya") || pool[0];
+  return pick("samantha") || pick("google") || pick("aaron") || pool[0];
 }
 
 // ── Volume meter + silence auto-stop (VAD) ────────────────────────────────────
@@ -999,6 +1044,7 @@ function startMeter(s) {
   analyser.fftSize = 256;
   src.connect(analyser);
   const data = new Uint8Array(analyser.frequencyBinCount);
+  let callVadSmooth = 0;
   function tick() {
     analyser.getByteFrequencyData(data);
     const avg = data.reduce((a, b) => a + b, 0) / data.length;
@@ -1010,7 +1056,9 @@ function startMeter(s) {
       mediaRecorder &&
       mediaRecorder.state === "recording"
     ) {
-      if (avg > LOUD_THRESH) {
+      callVadSmooth =
+        callVadSmooth * CALL_VAD_SMOOTH_DECAY + avg * CALL_VAD_SMOOTH_ATTACK;
+      if (callVadSmooth >= CALL_VAD_SMOOTH_THRESH) {
         hadSound = true;
         lastSoundTime = Date.now();
       }
@@ -1196,7 +1244,7 @@ async function startRecording() {
 
   micBtn.classList.add("active");
   micHint.textContent =
-    "聞いています… 話し終わって約3秒で自動停止、またはタップで停止 / Listening… ~3s silence ends clip, or tap to stop";
+    "聞いています… 話し終わって約1秒で自動停止、またはタップで停止 / Listening… ~1s silence ends clip, or tap to stop";
   setStatus("listening", "聞いています / Listening");
 }
 
@@ -1395,21 +1443,52 @@ async function pipeline(blob, mimeType, epoch) {
   scheduleLiveCallRestart();
 }
 
-// ── TTS — Web Speech API (on-device). iOS often blocks auto-speak after fetch().
-async function speak(text, detectedLang) {
+/** OpenAI TTS via server (mp3) — much clearer than Web Speech on phones. */
+async function speakWithOpenAiTts(t) {
+  const res = await fetch("/api/speak", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: t, language: callLangEl.value }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    let msg = "TTS failed";
+    try {
+      msg = JSON.parse(errText).error || msg;
+    } catch {
+      msg = errText.slice(0, 160) || msg;
+    }
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  serverTtsObjectUrl = url;
+  const audio = new Audio();
+  serverTtsAudio = audio;
+  audio.src = url;
+  audio.volume = 1;
+
+  await new Promise((resolve, reject) => {
+    audio.onplaying = () => setStatus("speaking", "読み上げ中 / Speaking");
+    audio.onended = () => resolve();
+    audio.onerror = () => reject(new Error("Audio playback failed"));
+    audio.play().catch(reject);
+  });
+  stopServerTts();
+  setStatus("", "待機中 / Idle");
+}
+
+/** Web Speech fallback when /api/speak fails or is blocked. */
+async function speakWithWebSpeech(t, detectedLang) {
   if (!window.speechSynthesis) {
     showError("このブラウザは読み上げに対応していません。 / Text-to-speech is not supported in this browser.");
     return;
   }
-  const t = String(text || "").trim();
-  if (!t) return;
-
   await ensureSpeechVoices();
   speechSynthesis.resume();
   if (speechSynthesis.speaking) speechSynthesis.cancel();
 
   const utter = new SpeechSynthesisUtterance(t);
-
   const lang = callLangEl.value;
   const d = String(detectedLang || "").toLowerCase();
   const isThai = lang === "th" || d === "th" || d === "thai";
@@ -1428,7 +1507,6 @@ async function speak(text, detectedLang) {
     utter.rate = 1.0;
   }
   utter.volume = 1.0;
-
   const v = pickVoiceForUtter(langTag);
   if (v) utter.voice = v;
 
@@ -1456,6 +1534,24 @@ async function speak(text, detectedLang) {
   });
 }
 
+async function speak(text, detectedLang) {
+  const t = String(text || "").trim();
+  if (!t) return;
+
+  stopServerTts();
+  if (window.speechSynthesis?.speaking) speechSynthesis.cancel();
+
+  try {
+    await speakWithOpenAiTts(t);
+    return;
+  } catch {
+    stopServerTts();
+    setStatus("", "待機中 / Idle");
+  }
+
+  await speakWithWebSpeech(t, detectedLang);
+}
+
 // ── Button handlers ───────────────────────────────────────────────────────────
 micBtn.addEventListener("click", () => {
   clearLiveCallTimer();
@@ -1467,8 +1563,10 @@ micBtn.addEventListener("click", () => {
 
   if (mainPipelinePending) return;
 
-  if (window.speechSynthesis?.speaking) {
-    speechSynthesis.cancel();
+  const hadTts = isTtsPlaying();
+  stopServerTts();
+  if (window.speechSynthesis?.speaking) speechSynthesis.cancel();
+  if (hadTts) {
     setStatus("", "待機中 / Idle");
     if (liveCallMode) {
       scheduleLiveCallRestart(280);
@@ -1511,6 +1609,7 @@ resetBtn.addEventListener("click", async () => {
   clearLiveCallTimer();
   liveCallMode = false;
   liveCallUserTapPending = false;
+  stopServerTts();
   window.speechSynthesis?.cancel();
   goalEl.value = "";
   clearConvoLog();

@@ -48,6 +48,10 @@ function whisperPromptFor(language) {
   return "This is a phone call.";
 }
 
+/** Vocabulary hint when language is auto (speakerphone / other party often dominates). */
+const WHISPER_PROMPT_AUTO =
+  "Live phone call, often speakerphone. Restaurant, reservation, table for, party of, how many guests, name, phone number, date, time.";
+
 /** Map Whisper verbose `language` to ja | en | th when we recognize it; else undefined. */
 function normalizeDetectedLanguage(raw) {
   if (raw == null || raw === "") return undefined;
@@ -74,16 +78,20 @@ function buildPrompt({ goal, tone, language }) {
     casual:   "Tone: friendly and relaxed.",
   };
 
-  return `You are an AI speaking OUT LOUD on a live phone call on behalf of the user.
+  return `You are helping someone on a LIVE phone call. They play your reply OUT LOUD (or repeat it) toward the other party.
 
-GOAL (the user may write this in English or another language — infer intent; your spoken reply must still follow LANGUAGE below): ${goal || "Handle the call professionally."}
+GOAL (may be in any language — infer intent; your line must follow LANGUAGE below): ${goal || "Handle the call professionally."}
 LANGUAGE: ${lang}
 ${tones[tone] || tones.polite}
 
+WHAT EACH "USER" TURN IS: a transcript of a short clip from the phone microphone — often speakerphone. It is usually what was JUST HEARD on the call (frequently the other person, e.g. restaurant staff), not a message typed by the user. It may be noisy or partial.
+
+YOUR JOB: say ONLY the next words the CALLER should speak out loud on the phone to move toward GOAL (e.g. book a table for 10, give name, confirm time). Answer the staff directly. Do not explain the app, do not meta-comment.
+
 RULES:
-- Maximum 2 short sentences; prefer 1 sentence when it answers clearly. Live speech — be concise.
+- Maximum 2 short sentences; prefer 1 when it is enough. Live speech — be concise.
 - Never reveal you are an AI unless directly asked.
-- No stage directions, no asterisks, no explanations — only the spoken words.
+- No stage directions, no asterisks, no "you should say" — only the spoken words the caller will use.
 - Stay focused on the goal.
 - In Japanese: open with 「はい、承知いたしました」or similar when appropriate.
 - In Thai: open politely (e.g. ครับ/ค่ะ, สวัสดีครับ/ค่ะ) when appropriate for the call.`;
@@ -101,7 +109,7 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
     });
 
     const isAuto = language === "auto" || !language;
-    const wPrompt = isAuto ? undefined : whisperPromptFor(language);
+    const wPrompt = isAuto ? WHISPER_PROMPT_AUTO : whisperPromptFor(language);
     const result = await openai.audio.transcriptions.create({
       model: "whisper-1",
       file,
@@ -158,8 +166,8 @@ app.post("/api/respond", async (req, res) => {
       const streamRes = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages,
-        max_tokens: 72,
-        temperature: 0.55,
+        max_tokens: 120,
+        temperature: 0.45,
         stream: true,
       });
       let full = "";
@@ -197,8 +205,8 @@ app.post("/api/respond", async (req, res) => {
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages,
-      max_tokens: 72,
-      temperature: 0.55,
+      max_tokens: 120,
+      temperature: 0.45,
     });
 
     const response = completion.choices[0]?.message?.content?.trim() ?? "";
@@ -209,6 +217,50 @@ app.post("/api/respond", async (req, res) => {
     console.error("Chat completion error:", err);
     const msg = err?.message || "Model request failed";
     res.status(500).json({ error: msg });
+  }
+});
+
+// ── POST /api/speak — OpenAI TTS (better voice than browser synthesis) ─────────
+const TTS_VOICES = new Set([
+  "alloy",
+  "ash",
+  "ballad",
+  "coral",
+  "echo",
+  "fable",
+  "onyx",
+  "nova",
+  "sage",
+  "shimmer",
+  "verse",
+]);
+
+app.post("/api/speak", express.json({ limit: "64kb" }), async (req, res) => {
+  const raw = req.body?.text;
+  const t = typeof raw === "string" ? raw.trim() : "";
+  if (!t) return res.status(400).json({ error: "No text" });
+  if (t.length > 4096) return res.status(400).json({ error: "Text too long (max 4096)" });
+
+  const modelRaw = (process.env.OPENAI_TTS_MODEL || "tts-1-hd").trim();
+  const model = modelRaw === "tts-1" || modelRaw === "tts-1-hd" ? modelRaw : "tts-1-hd";
+  const voiceRaw = (process.env.OPENAI_TTS_VOICE || "nova").trim().toLowerCase();
+  const voice = TTS_VOICES.has(voiceRaw) ? voiceRaw : "nova";
+
+  try {
+    const resp = await openai.audio.speech.create({
+      model,
+      voice,
+      input: t,
+      response_format: "mp3",
+    });
+    const buf = Buffer.from(await resp.arrayBuffer());
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Content-Length", String(buf.length));
+    res.setHeader("Cache-Control", "no-store");
+    res.send(buf);
+  } catch (err) {
+    console.error("TTS error:", err.message);
+    res.status(500).json({ error: err?.message || "TTS failed" });
   }
 });
 
