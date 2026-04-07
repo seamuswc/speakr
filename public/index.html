@@ -1215,24 +1215,27 @@ async function pipeline(blob, mimeType, epoch) {
 
   // 2. Generate response (streamed — text appears as the model types)
   let response;
-  setText(responseEl, "");
+  setText(responseEl, "返答を準備中… / Preparing reply…");
   setStatus("processing", "返答作成中 / Responding");
   try {
-    const result = await fetchRespondStream(
-      {
-        sessionId,
-        transcript,
-        goal: goalEl.value.trim(),
-        tone: toneEl.value,
-        language: callLangEl.value,
-        detectedLanguage,
-      },
-      epoch,
-      (_d, full) => {
-        if (epoch !== recordingEpoch) return;
-        setText(responseEl, full);
-      }
-    );
+    const [result] = await Promise.all([
+      fetchRespondStream(
+        {
+          sessionId,
+          transcript,
+          goal: goalEl.value.trim(),
+          tone: toneEl.value,
+          language: callLangEl.value,
+          detectedLanguage,
+        },
+        epoch,
+        (_d, full) => {
+          if (epoch !== recordingEpoch) return;
+          setText(responseEl, full);
+        }
+      ),
+      ensureSpeechVoices(),
+    ]);
     if (epoch !== recordingEpoch) return;
     response = result.response;
     detectedLanguage = result.detectedLanguage || detectedLanguage;

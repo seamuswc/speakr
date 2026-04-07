@@ -81,7 +81,7 @@ LANGUAGE: ${lang}
 ${tones[tone] || tones.polite}
 
 RULES:
-- Maximum 2 sentences. This is live speech — be concise.
+- Maximum 2 short sentences; prefer 1 sentence when it answers clearly. Live speech — be concise.
 - Never reveal you are an AI unless directly asked.
 - No stage directions, no asterisks, no explanations — only the spoken words.
 - Stay focused on the goal.
@@ -100,20 +100,28 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
       type: req.file.mimetype || "audio/webm",
     });
 
-    const wPrompt = language === "auto" ? undefined : whisperPromptFor(language);
+    const isAuto = language === "auto" || !language;
+    const wPrompt = isAuto ? undefined : whisperPromptFor(language);
     const result = await openai.audio.transcriptions.create({
       model: "whisper-1",
       file,
       language: whisperLangParam(language),
-      response_format: "verbose_json",
+      // json is lighter than verbose_json when caller language is fixed (faster turnaround)
+      response_format: isAuto ? "verbose_json" : "json",
       temperature: 0,
       ...(wPrompt ? { prompt: wPrompt } : {}),
     });
 
-    const rawLang = result.language ?? "en";
-    const detected = normalizeDetectedLanguage(rawLang) ?? rawLang;
+    const text = result.text?.trim() ?? "";
+    let detected;
+    if (isAuto) {
+      const rawLang = result.language ?? "en";
+      detected = normalizeDetectedLanguage(rawLang) ?? rawLang;
+    } else {
+      detected = normalizeDetectedLanguage(language) ?? language;
+    }
 
-    res.json({ text: result.text?.trim() ?? "", detectedLanguage: detected });
+    res.json({ text, detectedLanguage: detected });
   } catch (err) {
     console.error("Whisper error:", err.message);
     res.status(500).json({ error: err.message });
@@ -148,10 +156,10 @@ app.post("/api/respond", async (req, res) => {
     if (typeof res.flushHeaders === "function") res.flushHeaders();
     try {
       const streamRes = await openai.chat.completions.create({
-        model: "gpt-4o",
+        model: "gpt-4o-mini",
         messages,
-        max_tokens: 100,
-        temperature: 0.7,
+        max_tokens: 72,
+        temperature: 0.55,
         stream: true,
       });
       let full = "";
@@ -174,7 +182,7 @@ app.post("/api/respond", async (req, res) => {
       res.end();
     } catch (err) {
       session.history.pop();
-      console.error("GPT-4o stream error:", err);
+      console.error("Chat stream error:", err);
       try {
         res.write(JSON.stringify({ error: err?.message || "Model request failed" }) + "\n");
       } catch {
@@ -187,10 +195,10 @@ app.post("/api/respond", async (req, res) => {
 
   try {
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4o-mini",
       messages,
-      max_tokens: 100,
-      temperature: 0.7,
+      max_tokens: 72,
+      temperature: 0.55,
     });
 
     const response = completion.choices[0]?.message?.content?.trim() ?? "";
@@ -198,7 +206,7 @@ app.post("/api/respond", async (req, res) => {
     res.json({ response, detectedLanguage: normDet ?? detectedLanguage });
   } catch (err) {
     session.history.pop();
-    console.error("GPT-4o error:", err);
+    console.error("Chat completion error:", err);
     const msg = err?.message || "Model request failed";
     res.status(500).json({ error: msg });
   }
