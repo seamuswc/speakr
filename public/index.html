@@ -114,8 +114,7 @@
     display: block;
     font-size: 10px;
     color: var(--dim);
-    letter-spacing: 1px;
-    text-transform: uppercase;
+    letter-spacing: 0.02em;
     margin-bottom: 6px;
   }
 
@@ -234,8 +233,7 @@
 
   .card-label {
     font-size: 10px;
-    letter-spacing: 1px;
-    text-transform: uppercase;
+    letter-spacing: 0.02em;
     color: var(--dim);
     padding: 10px 14px 8px;
     border-bottom: 1px solid var(--border);
@@ -381,7 +379,7 @@
   </div>
   <div class="status">
     <div class="dot" id="dot"></div>
-    <span id="statusText">idle</span>
+    <span id="statusText">待機中 / Idle</span>
   </div>
 </div>
 
@@ -393,7 +391,7 @@
     <div class="field">
       <div class="field-head">
         <label for="goal">指示 / Instruction / Goal</label>
-        <button type="button" class="dictate-btn" id="goalDictateBtn" title="Speak your instruction — stops when quiet, or tap again" aria-label="Speak instruction" aria-pressed="false">
+        <button type="button" class="dictate-btn" id="goalDictateBtn" title="指示を話す — 静かになったら止まるか、もう一度タップ / Speak instruction — stops when quiet, or tap again" aria-label="指示を話す / Speak instruction" aria-pressed="false">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <rect x="9" y="2" width="6" height="12" rx="3"/>
             <path d="M5 10a7 7 0 0 0 14 0"/>
@@ -407,19 +405,19 @@
     <div class="field">
       <label>相手の言語 / Caller language</label>
       <input type="hidden" id="callLang" value="ja" />
-      <div class="lang-row" id="callLangRow" role="group" aria-label="Caller language">
+      <div class="lang-row" id="callLangRow" role="group" aria-label="相手の言語 / Caller language">
         <button type="button" class="lang-btn active" data-lang="ja" aria-pressed="true">日本語</button>
         <button type="button" class="lang-btn" data-lang="th" aria-pressed="false">ไทย</button>
         <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">English</button>
       </div>
     </div>
     <div class="field">
-      <label>Tone</label>
+      <label>口調 / Tone</label>
       <select id="tone">
-        <option value="polite">Polite</option>
-        <option value="formal">Formal</option>
-        <option value="assertive">Assertive</option>
-        <option value="casual">Casual</option>
+        <option value="polite">丁寧 / Polite</option>
+        <option value="formal">非常に丁寧 / Formal</option>
+        <option value="assertive">はっきり / Assertive</option>
+        <option value="casual">カジュアル / Casual</option>
       </select>
     </div>
   </div>
@@ -429,17 +427,17 @@
 
   <!-- They said -->
   <div class="card">
-    <div class="card-label">They said</div>
+    <div class="card-label">相手の発言 / They said</div>
     <div class="card-body" id="transcript">
-      <span class="placeholder">Transcript appears here…</span>
+      <span class="placeholder">文字起こしがここに表示されます / Transcript appears here…</span>
     </div>
   </div>
 
   <!-- AI response -->
   <div class="card">
-    <div class="card-label">AI response</div>
+    <div class="card-label">AIの返答 / AI response</div>
     <div class="card-body response" id="response">
-      <span class="placeholder">Response appears here…</span>
+      <span class="placeholder">返答がここに表示されます / Response appears here…</span>
     </div>
   </div>
 
@@ -459,10 +457,10 @@
     </svg>
   </button>
 
-  <div class="mic-hint" id="micHint">Tap to listen</div>
+  <div class="mic-hint" id="micHint">タップして聞く / Tap to listen</div>
 
   <div class="btn-row">
-    <button class="btn" id="resetBtn">↺ Reset</button>
+    <button class="btn" id="resetBtn">↺ リセット / Reset</button>
   </div>
 </div>
 
@@ -814,13 +812,13 @@ async function startRecording() {
       }
     });
   } catch (e) {
-    showError("Mic access denied. Tap the lock icon in your browser and allow microphone.");
+    showError("マイクを許可できません。鍵アイコンからマイクを許可してください。 / Mic access denied. Allow microphone in your browser.");
     return;
   }
 
   if (typeof MediaRecorder === "undefined") {
     stream.getTracks().forEach(t => t.stop());
-    showError("Recording is not supported in this browser.");
+    showError("このブラウザでは録音できません。 / Recording is not supported in this browser.");
     return;
   }
 
@@ -830,7 +828,7 @@ async function startRecording() {
     mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
   } catch (e) {
     stream.getTracks().forEach(t => t.stop());
-    showError("Could not start recorder: " + (e.message || "unknown error"));
+    showError("録音を開始できません / Could not start recorder: " + (e.message || "unknown error"));
     return;
   }
 
@@ -855,29 +853,30 @@ async function startRecording() {
     mediaRecorder.start(200);
   } catch (e) {
     stream.getTracks().forEach(t => t.stop());
-    showError("Could not start recording.");
+    showError("録音を開始できません。 / Could not start recording.");
     return;
   }
   isRecording = true;
   startMeter(stream);
 
   micBtn.classList.add("active");
-  micHint.textContent = "Listening… ~3s silence after speech ends clip, or tap to stop";
-  setStatus("listening", "listening");
+  micHint.textContent =
+    "聞いています… 話し終わって約3秒で自動停止、またはタップで停止 / Listening… ~3s silence ends clip, or tap to stop";
+  setStatus("listening", "聞いています / Listening");
 }
 
 function stopRecording() {
   if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
   isRecording = false;
   micBtn.classList.remove("active");
-  micHint.textContent = "Processing…";
-  setStatus("processing", "processing");
+  micHint.textContent = "処理中… / Processing…";
+  setStatus("processing", "処理中 / Processing");
 }
 
 function resetMic() {
   micBtn.classList.remove("active");
-  micHint.textContent = "Tap to listen";
-  setStatus("", "idle");
+  micHint.textContent = "タップして聞く / Tap to listen";
+  setStatus("", "待機中 / Idle");
   updateControlLocks();
 }
 
@@ -902,13 +901,13 @@ async function startGoalDictate() {
       },
     });
   } catch (e) {
-    showError("Mic access denied. Tap the lock icon in your browser and allow microphone.");
+    showError("マイクを許可できません。鍵アイコンからマイクを許可してください。 / Mic access denied. Allow microphone in your browser.");
     return;
   }
 
   if (typeof MediaRecorder === "undefined") {
     goalStream.getTracks().forEach(t => t.stop());
-    showError("Recording is not supported in this browser.");
+    showError("このブラウザでは録音できません。 / Recording is not supported in this browser.");
     return;
   }
 
@@ -918,7 +917,7 @@ async function startGoalDictate() {
     goalMediaRecorder = new MediaRecorder(goalStream, mimeType ? { mimeType } : {});
   } catch (e) {
     goalStream.getTracks().forEach(t => t.stop());
-    showError("Could not start recorder: " + (e.message || "unknown error"));
+    showError("録音を開始できません / Could not start recorder: " + (e.message || "unknown error"));
     return;
   }
 
@@ -948,7 +947,7 @@ async function startGoalDictate() {
         goalEl.value = cur ? cur + (cur.endsWith(" ") ? "" : " ") + text : text;
       }
     } catch (e) {
-      showError("Instruction dictation failed: " + e.message);
+      showError("指示の音声入力に失敗しました / Instruction dictation failed: " + e.message);
     } finally {
       finishGoalDictate();
     }
@@ -958,7 +957,7 @@ async function startGoalDictate() {
     goalMediaRecorder.start(200);
   } catch (e) {
     goalStream.getTracks().forEach(t => t.stop());
-    showError("Could not start recording.");
+    showError("録音を開始できません。 / Could not start recording.");
     return;
   }
 
@@ -989,7 +988,7 @@ async function pipeline(blob, mimeType, epoch) {
     detectedLanguage = data.detectedLanguage;
   } catch (e) {
     if (epoch !== recordingEpoch) return;
-    showError("Transcription failed: " + e.message);
+    showError("文字起こしに失敗しました / Transcription failed: " + e.message);
     resetMic();
     return;
   }
@@ -1001,7 +1000,7 @@ async function pipeline(blob, mimeType, epoch) {
   // 2. Generate response (streamed — text appears as the model types)
   let response;
   setText(responseEl, "");
-  setStatus("processing", "responding");
+  setStatus("processing", "返答作成中 / Responding");
   try {
     const result = await fetchRespondStream(
       {
@@ -1024,14 +1023,14 @@ async function pipeline(blob, mimeType, epoch) {
   } catch (e) {
     if (epoch !== recordingEpoch) return;
     if (e && (e.name === "AbortError" || e.message === "Aborted")) return;
-    showError("Response failed: " + e.message);
+    showError("応答に失敗しました / Response failed: " + e.message);
     resetMic();
     return;
   }
 
   if (epoch !== recordingEpoch) return;
   if (!response || !response.trim()) {
-    showError("No reply from the model.");
+    showError("モデルから返答がありません。 / No reply from the model.");
     resetMic();
     return;
   }
@@ -1043,7 +1042,7 @@ async function pipeline(blob, mimeType, epoch) {
   try {
     await speak(response, detectedLanguage);
   } catch (e) {
-    showError("Could not speak: " + (e.message || "unknown"));
+    showError("音声再生できませんでした / Could not speak: " + (e.message || "unknown"));
   }
   resetMic();
 }
@@ -1051,7 +1050,7 @@ async function pipeline(blob, mimeType, epoch) {
 // ── TTS — Web Speech API (on-device). iOS often blocks auto-speak after fetch().
 async function speak(text, detectedLang) {
   if (!window.speechSynthesis) {
-    showError("Text-to-speech not supported in this browser.");
+    showError("このブラウザは読み上げに対応していません。 / Text-to-speech is not supported in this browser.");
     return;
   }
   const t = String(text || "").trim();
@@ -1086,20 +1085,24 @@ async function speak(text, detectedLang) {
   if (v) utter.voice = v;
 
   return new Promise((resolve) => {
-    utter.onstart = () => setStatus("speaking", "speaking");
+    utter.onstart = () => setStatus("speaking", "読み上げ中 / Speaking");
     utter.onend = () => {
-      setStatus("", "idle");
+      setStatus("", "待機中 / Idle");
       resolve();
     };
     utter.onerror = () => {
-      setStatus("", "idle");
-      showError("Speech didn’t play — tap the screen, then try again (iOS often blocks TTS until you interact).");
+      setStatus("", "待機中 / Idle");
+      showError(
+        "音声が鳴りませんでした。画面をタップしてから再試行してください（iOSは操作後に読み上げることがあります）。 / Speech didn’t play — tap the screen, then try again."
+      );
       resolve();
     };
     try {
       speechSynthesis.speak(utter);
     } catch (e) {
-      showError("Speech failed — try tapping the page, then the mic again.");
+      showError(
+        "読み上げに失敗しました。ページをタップしてからマイクを試してください。 / Speech failed — tap the page, then try the mic again."
+      );
       resolve();
     }
   });
@@ -1113,7 +1116,7 @@ micBtn.addEventListener("click", () => {
   }
   if (window.speechSynthesis?.speaking) {
     speechSynthesis.cancel();
-    setStatus("", "idle");
+    setStatus("", "待機中 / Idle");
   }
   startRecording();
 });
@@ -1137,7 +1140,7 @@ resetBtn.addEventListener("click", async () => {
   lastResponse = "";
   lastDetectedLanguage = "";
   errorEl.classList.remove("show");
-  setStatus("", "idle");
+  setStatus("", "待機中 / Idle");
   await fetch("/api/reset", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
