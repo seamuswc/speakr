@@ -392,7 +392,7 @@
   <div class="setup">
     <div class="field">
       <div class="field-head">
-        <label for="goal">Instruction / Goal</label>
+        <label for="goal">指示 / Instruction / Goal</label>
         <button type="button" class="dictate-btn" id="goalDictateBtn" title="Speak your instruction — stops when quiet, or tap again" aria-label="Speak instruction" aria-pressed="false">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <rect x="9" y="2" width="6" height="12" rx="3"/>
@@ -402,11 +402,10 @@
           </svg>
         </button>
       </div>
-      <textarea id="goal" placeholder="Type or tap the mic — any language; mic auto-detects"></textarea>
-      <p class="field-note">Small mic uses auto language detection. Caller language below is only for the phone call.</p>
+      <textarea id="goal" placeholder="指示（日本語でも英語でもOK） / Instruction (any language)"></textarea>
     </div>
     <div class="field">
-      <label>Caller’s language — they speak; big mic &amp; AI reply</label>
+      <label>相手の言語 / Caller language</label>
       <input type="hidden" id="callLang" value="ja" />
       <div class="lang-row" id="callLangRow" role="group" aria-label="Caller language">
         <button type="button" class="lang-btn active" data-lang="ja" aria-pressed="true">日本語</button>
