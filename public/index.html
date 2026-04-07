@@ -479,10 +479,19 @@ let animFrame     = null;
 let lastResponse  = "";
 let lastDetectedLanguage = "";
 
-/** Auto-stop recording after speech + silence (VAD) */
-const SILENCE_MS = 1000;
-const MIN_RECORD_MS = 1400;
+/**
+ * VAD: recording stops only after we hear speech, then silence for a while.
+ * Continuous talk (even many minutes) does NOT auto-stop — each loud frame refreshes the timer.
+ */
 const LOUD_THRESH = 6;
+
+/** Big mic (phone call): allow natural gaps between sentences */
+const CALL_SILENCE_MS = 3200;
+const CALL_MIN_RECORD_MS = 2000;
+
+/** Instruction mic: shorter tail so quick dictate still feels snappy */
+const GOAL_SILENCE_MS = 1100;
+const GOAL_MIN_RECORD_MS = 1200;
 let recordStartAt = 0;
 let hadSound = false;
 let lastSoundTime = 0;
@@ -695,8 +704,8 @@ function startMeter(s) {
       if (
         hadSound &&
         lastSoundTime &&
-        now - lastSoundTime >= SILENCE_MS &&
-        now - recordStartAt >= MIN_RECORD_MS
+        now - lastSoundTime >= CALL_SILENCE_MS &&
+        now - recordStartAt >= CALL_MIN_RECORD_MS
       ) {
         vadFired = true;
         stopRecording();
@@ -752,8 +761,8 @@ function startGoalMeter(s) {
       if (
         goalHadSound &&
         goalLastSoundTime &&
-        now - goalLastSoundTime >= SILENCE_MS &&
-        now - goalRecordStartAt >= MIN_RECORD_MS
+        now - goalLastSoundTime >= GOAL_SILENCE_MS &&
+        now - goalRecordStartAt >= GOAL_MIN_RECORD_MS
       ) {
         goalVadFired = true;
         stopGoalDictate();
@@ -839,7 +848,7 @@ async function startRecording() {
   startMeter(stream);
 
   micBtn.classList.add("active");
-  micHint.textContent = "Listening… stops when quiet, or tap to stop";
+  micHint.textContent = "Listening… ~3s silence after speech ends clip, or tap to stop";
   setStatus("listening", "listening");
 }
 
