@@ -457,7 +457,7 @@
     </svg>
   </button>
 
-  <div class="mic-hint" id="micHint">タップして聞く / Tap to listen</div>
+  <div class="mic-hint" id="micHint">タップでライブ通話開始（1回） / Tap once for live call</div>
 
   <div class="btn-row">
     <button class="btn" id="resetBtn">↺ リセット / Reset</button>
@@ -483,6 +483,12 @@ let analyser      = null;
 let animFrame     = null;
 let lastResponse  = "";
 let lastDetectedLanguage = "";
+
+/** One mic tap starts listen→reply→listen loop until tap again (idle) or Reset */
+let liveCallMode = false;
+let liveCallTimer = null;
+/** True only for the user’s first tap before recording actually starts (rollback on failure) */
+let liveCallUserTapPending = false;
 
 /**
  * VAD: recording stops only after we hear speech, then silence for a while.
@@ -534,6 +540,38 @@ function setCallLang(code) {
     btn.classList.toggle("active", on);
     btn.setAttribute("aria-pressed", on ? "true" : "false");
   });
+}
+
+function clearLiveCallTimer() {
+  if (liveCallTimer != null) {
+    clearTimeout(liveCallTimer);
+    liveCallTimer = null;
+  }
+}
+
+function updateIdleMicHint() {
+  if (liveCallMode) {
+    micHint.textContent =
+      "ライブ通話中 — 終了: 待機中にマイクをタップ、またはリセット / Live — tap mic when idle, or Reset to end";
+  } else {
+    micHint.textContent = "タップでライブ通話開始（1回） / Tap once for live call";
+  }
+}
+
+/** After a turn, start listening again without another tap (live call). */
+function scheduleLiveCallRestart(delayMs = 550) {
+  clearLiveCallTimer();
+  if (!liveCallMode) return;
+  liveCallTimer = setTimeout(() => {
+    liveCallTimer = null;
+    if (!liveCallMode) return;
+    if (mainPipelinePending || goalFlowBusy || isRecording) return;
+    if (window.speechSynthesis?.speaking) {
+      scheduleLiveCallRestart(220);
+      return;
+    }
+    startRecording();
+  }, delayMs);
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -799,6 +837,14 @@ function getMimeType() {
 
 // ── Recording ─────────────────────────────────────────────────────────────────
 async function startRecording() {
+  if (goalFlowBusy) {
+    if (liveCallUserTapPending) {
+      liveCallMode = false;
+      liveCallUserTapPending = false;
+      updateIdleMicHint();
+    }
+    return;
+  }
   recordingEpoch++;
   const myEpoch = recordingEpoch;
   errorEl.classList.remove("show");
@@ -812,12 +858,22 @@ async function startRecording() {
       }
     });
   } catch (e) {
+    if (liveCallUserTapPending) {
+      liveCallMode = false;
+      liveCallUserTapPending = false;
+      updateIdleMicHint();
+    }
     showError("マイクを許可できません。鍵アイコンからマイクを許可してください。 / Mic access denied. Allow microphone in your browser.");
     return;
   }
 
   if (typeof MediaRecorder === "undefined") {
     stream.getTracks().forEach(t => t.stop());
+    if (liveCallUserTapPending) {
+      liveCallMode = false;
+      liveCallUserTapPending = false;
+      updateIdleMicHint();
+    }
     showError("このブラウザでは録音できません。 / Recording is not supported in this browser.");
     return;
   }
@@ -828,6 +884,11 @@ async function startRecording() {
     mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
   } catch (e) {
     stream.getTracks().forEach(t => t.stop());
+    if (liveCallUserTapPending) {
+      liveCallMode = false;
+      liveCallUserTapPending = false;
+      updateIdleMicHint();
+    }
     showError("録音を開始できません / Could not start recorder: " + (e.message || "unknown error"));
     return;
   }
@@ -838,7 +899,11 @@ async function startRecording() {
     stream.getTracks().forEach(t => t.stop());
     if (myEpoch !== recordingEpoch) return;
     const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || "audio/webm" });
-    if (blob.size < 500) { resetMic(); return; }
+    if (blob.size < 500) {
+      resetMic();
+      scheduleLiveCallRestart();
+      return;
+    }
     mainPipelinePending = true;
     updateControlLocks();
     try {
@@ -853,10 +918,16 @@ async function startRecording() {
     mediaRecorder.start(200);
   } catch (e) {
     stream.getTracks().forEach(t => t.stop());
+    if (liveCallUserTapPending) {
+      liveCallMode = false;
+      liveCallUserTapPending = false;
+      updateIdleMicHint();
+    }
     showError("録音を開始できません。 / Could not start recording.");
     return;
   }
   isRecording = true;
+  liveCallUserTapPending = false;
   startMeter(stream);
 
   micBtn.classList.add("active");
@@ -875,7 +946,7 @@ function stopRecording() {
 
 function resetMic() {
   micBtn.classList.remove("active");
-  micHint.textContent = "タップして聞く / Tap to listen";
+  updateIdleMicHint();
   setStatus("", "待機中 / Idle");
   updateControlLocks();
 }
@@ -990,10 +1061,15 @@ async function pipeline(blob, mimeType, epoch) {
     if (epoch !== recordingEpoch) return;
     showError("文字起こしに失敗しました / Transcription failed: " + e.message);
     resetMic();
+    scheduleLiveCallRestart();
     return;
   }
 
-  if (!transcript || transcript.trim().length < 2) { resetMic(); return; }
+  if (!transcript || transcript.trim().length < 2) {
+    resetMic();
+    scheduleLiveCallRestart();
+    return;
+  }
   if (epoch !== recordingEpoch) return;
   setText(transcriptEl, transcript);
 
@@ -1025,6 +1101,7 @@ async function pipeline(blob, mimeType, epoch) {
     if (e && (e.name === "AbortError" || e.message === "Aborted")) return;
     showError("応答に失敗しました / Response failed: " + e.message);
     resetMic();
+    scheduleLiveCallRestart();
     return;
   }
 
@@ -1032,6 +1109,7 @@ async function pipeline(blob, mimeType, epoch) {
   if (!response || !response.trim()) {
     showError("モデルから返答がありません。 / No reply from the model.");
     resetMic();
+    scheduleLiveCallRestart();
     return;
   }
   lastResponse = response;
@@ -1045,6 +1123,7 @@ async function pipeline(blob, mimeType, epoch) {
     showError("音声再生できませんでした / Could not speak: " + (e.message || "unknown"));
   }
   resetMic();
+  scheduleLiveCallRestart();
 }
 
 // ── TTS — Web Speech API (on-device). iOS often blocks auto-speak after fetch().
@@ -1110,14 +1189,36 @@ async function speak(text, detectedLang) {
 
 // ── Button handlers ───────────────────────────────────────────────────────────
 micBtn.addEventListener("click", () => {
+  clearLiveCallTimer();
+
   if (isRecording) {
     stopRecording();
     return;
   }
+
+  if (mainPipelinePending) return;
+
   if (window.speechSynthesis?.speaking) {
     speechSynthesis.cancel();
     setStatus("", "待機中 / Idle");
+    if (liveCallMode) {
+      scheduleLiveCallRestart(280);
+    } else {
+      startRecording();
+    }
+    return;
   }
+
+  if (liveCallMode) {
+    liveCallMode = false;
+    liveCallUserTapPending = false;
+    updateIdleMicHint();
+    setStatus("", "待機中 / Idle");
+    return;
+  }
+
+  liveCallMode = true;
+  liveCallUserTapPending = true;
   startRecording();
 });
 
@@ -1133,6 +1234,9 @@ callLangRow.addEventListener("click", (e) => {
 });
 
 resetBtn.addEventListener("click", async () => {
+  clearLiveCallTimer();
+  liveCallMode = false;
+  liveCallUserTapPending = false;
   window.speechSynthesis?.cancel();
   goalEl.value = "";
   setText(transcriptEl, "");
@@ -1140,6 +1244,7 @@ resetBtn.addEventListener("click", async () => {
   lastResponse = "";
   lastDetectedLanguage = "";
   errorEl.classList.remove("show");
+  updateIdleMicHint();
   setStatus("", "待機中 / Idle");
   await fetch("/api/reset", {
     method: "POST",
@@ -1153,6 +1258,7 @@ document.addEventListener("touchmove", e => { if (e.target === document.body) e.
 
 updateControlLocks();
 setCallLang(callLangEl.value || "ja");
+updateIdleMicHint();
 updateControlsHeightVar();
 window.addEventListener("resize", updateControlsHeightVar, { passive: true });
 
