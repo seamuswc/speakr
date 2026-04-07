@@ -333,6 +333,16 @@
   }
 
   .btn:active { opacity: 0.6; }
+
+  .btn.replay-pulse {
+    animation: replayPulse 1s ease-in-out 3;
+    border-color: var(--green);
+    color: var(--green);
+  }
+  @keyframes replayPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0.35); }
+    50% { box-shadow: 0 0 14px 3px rgba(34,197,94,0.25); }
+  }
 </style>
 </head>
 <body>
@@ -454,6 +464,10 @@ let animFrame     = null;
 let lastResponse  = "";
 let lastDetectedLanguage = "";
 
+const isIOS =
+  /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
 // ── DOM ────────────────────────────────────────────────────────────────────────
 const micBtn      = document.getElementById("micBtn");
 const micHint     = document.getElementById("micHint");
@@ -507,6 +521,38 @@ function updateControlLocks() {
   micBtn.disabled = goalFlowBusy;
   goalDictateBtn.disabled =
     isRecording || mainPipelinePending || (goalFlowBusy && !isGoalDictating);
+}
+
+/** iOS pauses speech synthesis; WebKit often loads voices async — wait before speak. */
+function ensureSpeechVoices() {
+  return new Promise((resolve) => {
+    if (!window.speechSynthesis) {
+      resolve();
+      return;
+    }
+    speechSynthesis.resume();
+    if (speechSynthesis.getVoices().length) {
+      resolve();
+      return;
+    }
+    const done = () => {
+      speechSynthesis.removeEventListener("voiceschanged", done);
+      resolve();
+    };
+    speechSynthesis.addEventListener("voiceschanged", done);
+    setTimeout(done, 600);
+  });
+}
+
+/** Pick a device voice so Thai/Japanese aren’t silent when default is wrong. */
+function pickVoiceForUtter(langCode) {
+  const voices = speechSynthesis.getVoices();
+  if (!voices.length) return null;
+  const want = (langCode || "en").toLowerCase().slice(0, 2);
+  const byLang =
+    voices.find((v) => (v.lang || "").toLowerCase().startsWith(want)) ||
+    voices.find((v) => (v.lang || "").toLowerCase().includes(want));
+  return byLang || null;
 }
 
 // ── Volume meter ───────────────────────────────────────────────────────────────
@@ -770,29 +816,50 @@ async function pipeline(blob, mimeType, epoch) {
   lastDetectedLanguage = detectedLanguage || langEl.value || "";
   setText(responseEl, response);
 
-  // 3. Speak
-  speak(response, detectedLanguage);
+  // 3. Speak (async — iOS often blocks speech unless user later taps ⟳ Replay)
+  try {
+    await speak(response, detectedLanguage);
+  } catch (e) {
+    showError("Could not speak: " + (e.message || "unknown"));
+  }
   resetMic();
+  if (isIOS) {
+    replayBtn.classList.add("replay-pulse");
+    micHint.textContent = "Tap ⟳ Replay if you didn’t hear the reply";
+    setTimeout(() => replayBtn.classList.remove("replay-pulse"), 4000);
+    setTimeout(() => {
+      if (!isRecording && micHint.textContent.includes("Replay")) micHint.textContent = "Tap to listen";
+    }, 10000);
+  }
 }
 
-// ── TTS — Web Speech API ──────────────────────────────────────────────────────
-// Runs entirely on-device. On iOS: use a Japanese/English Siri voice.
-// No external API needed.
-function speak(text, detectedLang) {
-  if (!window.speechSynthesis) { showError("Text-to-speech not supported in this browser."); return; }
-  window.speechSynthesis.cancel();
+// ── TTS — Web Speech API (on-device). iOS often blocks auto-speak after fetch() — use ⟳ Replay.
+async function speak(text, detectedLang) {
+  if (!window.speechSynthesis) {
+    showError("Text-to-speech not supported in this browser.");
+    return;
+  }
+  const t = String(text || "").trim();
+  if (!t) return;
 
-  const utter = new SpeechSynthesisUtterance(text);
+  await ensureSpeechVoices();
+  speechSynthesis.resume();
+  if (speechSynthesis.speaking) speechSynthesis.cancel();
+
+  const utter = new SpeechSynthesisUtterance(t);
 
   const lang = langEl.value;
   const d = String(detectedLang || "").toLowerCase();
   const isThai = lang === "th" || d === "th" || d === "thai";
   const isJa = lang === "ja" || d === "ja" || d === "japanese";
+  let langTag = "en";
   if (isThai) {
     utter.lang = "th-TH";
+    langTag = "th";
     utter.rate = 0.9;
   } else if (isJa) {
     utter.lang = "ja-JP";
+    langTag = "ja";
     utter.rate = 0.92;
   } else {
     utter.lang = "en-US";
@@ -800,13 +867,27 @@ function speak(text, detectedLang) {
   }
   utter.volume = 1.0;
 
-  utter.onstart = () => setStatus("speaking", "speaking");
-  utter.onend = () => setStatus("", "idle");
-  utter.onerror = () => setStatus("", "idle");
+  const v = pickVoiceForUtter(langTag);
+  if (v) utter.voice = v;
 
-  // iOS Safari requires a user gesture before speak() works.
-  // We're already inside a button click chain, so this is fine.
-  window.speechSynthesis.speak(utter);
+  return new Promise((resolve) => {
+    utter.onstart = () => setStatus("speaking", "speaking");
+    utter.onend = () => {
+      setStatus("", "idle");
+      resolve();
+    };
+    utter.onerror = () => {
+      setStatus("", "idle");
+      showError("Speech didn’t play — tap ⟳ Replay (iOS often blocks auto-speak after loading).");
+      resolve();
+    };
+    try {
+      speechSynthesis.speak(utter);
+    } catch (e) {
+      showError("Speech failed — tap ⟳ Replay.");
+      resolve();
+    }
+  });
 }
 
 // ── Button handlers ───────────────────────────────────────────────────────────
@@ -821,7 +902,7 @@ goalDictateBtn.addEventListener("click", () => {
 });
 
 replayBtn.addEventListener("click", () => {
-  if (lastResponse) speak(lastResponse, lastDetectedLanguage);
+  if (lastResponse) void speak(lastResponse, lastDetectedLanguage);
 });
 
 stopBtn.addEventListener("click", () => {
@@ -847,6 +928,17 @@ resetBtn.addEventListener("click", async () => {
 document.addEventListener("touchmove", e => { if (e.target === document.body) e.preventDefault(); }, { passive: false });
 
 updateControlLocks();
+
+// Wake speech engine on first touch (helps iOS). Runs in same gesture as mic.
+["touchstart", "pointerdown"].forEach((ev) => {
+  micBtn.addEventListener(
+    ev,
+    () => {
+      if (window.speechSynthesis) speechSynthesis.resume();
+    },
+    { passive: true }
+  );
+});
 </script>
 
 </body>
