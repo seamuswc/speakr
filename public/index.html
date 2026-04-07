@@ -93,7 +93,7 @@
     flex: 1;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    padding: 16px 16px 0;
+    padding: 16px 16px calc(var(--controls-h, 210px) + env(safe-area-inset-bottom, 0));
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -521,6 +521,7 @@ const transcriptEl = document.getElementById("transcript");
 const responseEl  = document.getElementById("response");
 const errorEl     = document.getElementById("error");
 const meterFill   = document.getElementById("meter");
+const controlsEl  = document.querySelector(".controls");
 const resetBtn    = document.getElementById("resetBtn");
 const goalEl         = document.getElementById("goal");
 const goalDictateBtn = document.getElementById("goalDictateBtn");
@@ -645,6 +646,12 @@ function updateControlLocks() {
   micBtn.disabled = goalFlowBusy;
   goalDictateBtn.disabled =
     isRecording || mainPipelinePending || (goalFlowBusy && !isGoalDictating);
+}
+
+function updateControlsHeightVar() {
+  const h = controlsEl?.getBoundingClientRect?.().height;
+  if (!h) return;
+  document.documentElement.style.setProperty("--controls-h", Math.ceil(h) + "px");
 }
 
 /** iOS pauses speech synthesis; WebKit often loads voices async — wait before speak. */
@@ -1143,6 +1150,8 @@ document.addEventListener("touchmove", e => { if (e.target === document.body) e.
 
 updateControlLocks();
 setCallLang(callLangEl.value || "ja");
+updateControlsHeightVar();
+window.addEventListener("resize", updateControlsHeightVar, { passive: true });
 
 // Wake speech engine on first touch (helps iOS). Runs in same gesture as mic.
 ["touchstart", "pointerdown"].forEach((ev) => {
