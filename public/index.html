@@ -256,6 +256,74 @@
 
   .placeholder { color: var(--dim); font-size: 13px; }
 
+  /* ── Conversation log + outcome ── */
+  .convo-body {
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    max-height: min(42vh, 320px);
+  }
+  .convo-scroll {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 12px 14px;
+    min-height: 72px;
+  }
+  .convo-turn {
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .convo-turn:last-child {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+  }
+  .convo-line { margin-bottom: 10px; }
+  .convo-line:last-child { margin-bottom: 0; }
+  .convo-tag {
+    display: block;
+    font-size: 10px;
+    color: var(--dim);
+    letter-spacing: 0.02em;
+    margin-bottom: 4px;
+  }
+  .convo-msg {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--mid);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .convo-ai .convo-msg {
+    color: var(--text);
+    font-weight: 500;
+    font-size: 15px;
+  }
+  .convo-outcome {
+    flex-shrink: 0;
+    border-top: 1px solid var(--border);
+    padding: 12px 14px 14px;
+    background: var(--green-glow);
+  }
+  .convo-outcome.is-empty { display: none; }
+  .convo-outcome-label {
+    font-size: 10px;
+    color: var(--dim);
+    margin-bottom: 6px;
+    letter-spacing: 0.02em;
+  }
+  .convo-outcome-text {
+    font-size: 16px;
+    color: var(--text);
+    line-height: 1.45;
+    font-weight: 600;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
   /* ── Error ── */
   .error {
     background: #1a0a0a;
@@ -441,6 +509,20 @@
     </div>
   </div>
 
+  <!-- Running conversation + latest outcome -->
+  <div class="card">
+    <div class="card-label">会話の記録 / Conversation</div>
+    <div class="card-body convo-body">
+      <div class="convo-scroll" id="convoLog" aria-live="polite">
+        <span class="placeholder" id="convoPlaceholder">やり取りがここに積み上がります / Your call builds here…</span>
+      </div>
+      <div class="convo-outcome is-empty" id="convoOutcome" aria-label="いまの結果 / Current outcome">
+        <div class="convo-outcome-label">いまの結果 / Current outcome</div>
+        <div class="convo-outcome-text" id="convoOutcomeText"></div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <!-- Fixed bottom controls -->
@@ -526,6 +608,9 @@ const responseEl  = document.getElementById("response");
 const errorEl     = document.getElementById("error");
 const meterFill   = document.getElementById("meter");
 const controlsEl  = document.querySelector(".controls");
+const convoLog    = document.getElementById("convoLog");
+const convoOutcome = document.getElementById("convoOutcome");
+const convoOutcomeText = document.getElementById("convoOutcomeText");
 const resetBtn    = document.getElementById("resetBtn");
 const goalEl         = document.getElementById("goal");
 const goalDictateBtn = document.getElementById("goalDictateBtn");
@@ -588,6 +673,61 @@ function showError(msg) {
 
 function setText(el, text) {
   el.textContent = text;
+}
+
+function appendConvoTurn(themText, aiText) {
+  const them = String(themText || "").trim();
+  const ai = String(aiText || "").trim();
+  if (!them && !ai) return;
+
+  const ph = document.getElementById("convoPlaceholder");
+  if (ph) ph.remove();
+
+  const turn = document.createElement("div");
+  turn.className = "convo-turn";
+
+  const rowThem = document.createElement("div");
+  rowThem.className = "convo-line convo-them";
+  const labThem = document.createElement("span");
+  labThem.className = "convo-tag";
+  labThem.textContent = "相手 / Them";
+  const txtThem = document.createElement("p");
+  txtThem.className = "convo-msg";
+  txtThem.textContent = them || "—";
+  rowThem.appendChild(labThem);
+  rowThem.appendChild(txtThem);
+
+  const rowAi = document.createElement("div");
+  rowAi.className = "convo-line convo-ai";
+  const labAi = document.createElement("span");
+  labAi.className = "convo-tag";
+  labAi.textContent = "AI";
+  const txtAi = document.createElement("p");
+  txtAi.className = "convo-msg";
+  txtAi.textContent = ai || "—";
+  rowAi.appendChild(labAi);
+  rowAi.appendChild(txtAi);
+
+  turn.appendChild(rowThem);
+  turn.appendChild(rowAi);
+  convoLog.appendChild(turn);
+  convoLog.scrollTop = convoLog.scrollHeight;
+
+  if (ai) {
+    convoOutcomeText.textContent = ai;
+    convoOutcome.classList.remove("is-empty");
+  }
+}
+
+function clearConvoLog() {
+  convoLog.innerHTML = "";
+  const ph = document.createElement("span");
+  ph.className = "placeholder";
+  ph.id = "convoPlaceholder";
+  ph.textContent = "やり取りがここに積み上がります / Your call builds here…";
+  convoLog.appendChild(ph);
+  convoOutcomeText.textContent = "";
+  convoOutcome.classList.add("is-empty");
 }
 
 async function fetchJson(url, options) {
@@ -1115,6 +1255,7 @@ async function pipeline(blob, mimeType, epoch) {
   lastResponse = response;
   lastDetectedLanguage = detectedLanguage || callLangEl.value || "";
   setText(responseEl, response);
+  appendConvoTurn(transcript, response);
 
   // 3. Speak (async — iOS may block TTS until user interacts again)
   try {
@@ -1239,6 +1380,7 @@ resetBtn.addEventListener("click", async () => {
   liveCallUserTapPending = false;
   window.speechSynthesis?.cancel();
   goalEl.value = "";
+  clearConvoLog();
   setText(transcriptEl, "");
   setText(responseEl, "");
   lastResponse = "";
