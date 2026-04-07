@@ -188,6 +188,34 @@
 
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
+  .lang-row {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+  }
+  .lang-btn {
+    flex: 1;
+    min-width: 0;
+    padding: 10px 8px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: #1a1a1a;
+    color: var(--mid);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    outline: none;
+    -webkit-appearance: none;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+  }
+  .lang-btn:active { opacity: 0.85; }
+  .lang-btn.active {
+    border-color: var(--green);
+    background: var(--green-glow);
+    color: var(--green);
+  }
+
   select {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
@@ -450,22 +478,13 @@
       </div>
       <textarea id="goal" placeholder="指示（日本語でも英語でもOK） / Instruction (any language)"></textarea>
     </div>
-    <div class="row">
-      <div class="field">
-        <label for="instructionLang">あなたの言語 / Your language</label>
-        <select id="instructionLang">
-          <option value="ja">日本語</option>
-          <option value="en" selected>English</option>
-          <option value="th">ไทย</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="callLang">相手の言語 / Caller language</label>
-        <select id="callLang">
-          <option value="ja" selected>日本語</option>
-          <option value="th">ไทย</option>
-          <option value="en">English</option>
-        </select>
+    <div class="field">
+      <label>通話の言語 / Call language</label>
+      <input type="hidden" id="callLang" value="ja" />
+      <div class="lang-row" id="callLangRow" role="group" aria-label="通話の言語 / Call language">
+        <button type="button" class="lang-btn active" data-lang="ja" aria-pressed="true">日本語</button>
+        <button type="button" class="lang-btn" data-lang="th" aria-pressed="false">ไทย</button>
+        <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">English</button>
       </div>
     </div>
     <div class="field">
@@ -595,8 +614,27 @@ const goalEl         = document.getElementById("goal");
 const goalDictateBtn = document.getElementById("goalDictateBtn");
 const toneEl         = document.getElementById("tone");
 const callLangEl = document.getElementById("callLang");
-const instructionLangEl = document.getElementById("instructionLang");
+const callLangRow = document.getElementById("callLangRow");
 const convoOutcomeLabel = document.getElementById("convoOutcomeLabel");
+
+/** Your language for log labels + outcome: from 指示 / goal text (no extra control). */
+function goalInstructionLang() {
+  const t = goalEl.value || "";
+  if (/[\u0E00-\u0E7F]/.test(t)) return "th";
+  if (/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(t)) return "ja";
+  return "en";
+}
+
+function setCallLang(code) {
+  if (!["ja", "en", "th"].includes(code)) return;
+  callLangEl.value = code;
+  callLangRow.querySelectorAll(".lang-btn").forEach((btn) => {
+    const on = btn.dataset.lang === code;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+  refreshOutcomeStripIfWaiting();
+}
 
 /** Full call log for outcome API */
 let convoTurns = [];
@@ -627,7 +665,7 @@ function callerSideLabel() {
 
 /** Your line / AI suggestion column: label in your (instruction) language only. */
 function receiverSideLabel() {
-  switch (instructionLangEl.value) {
+  switch (goalInstructionLang()) {
     case "ja":
       return "あなたの返答";
     case "th":
@@ -638,7 +676,7 @@ function receiverSideLabel() {
 }
 
 function outcomeTitleNative() {
-  switch (instructionLangEl.value) {
+  switch (goalInstructionLang()) {
     case "ja":
       return "結果";
     case "th":
@@ -649,7 +687,7 @@ function outcomeTitleNative() {
 }
 
 function outcomeWaitingBody() {
-  switch (instructionLangEl.value) {
+  switch (goalInstructionLang()) {
     case "ja":
       return "ライブ通話を終了（待機中にマイクをタップ）すると、指示に対する結果がここに書かれます。";
     case "th":
@@ -660,7 +698,7 @@ function outcomeWaitingBody() {
 }
 
 function outcomeEmptyBody() {
-  switch (instructionLangEl.value) {
+  switch (goalInstructionLang()) {
     case "ja":
       return "まだ会話がありません。";
     case "th":
@@ -784,12 +822,9 @@ async function fetchCallOutcome() {
     convoOutcomeText.textContent = outcomeEmptyBody();
     return;
   }
+  const gl = goalInstructionLang();
   const loading =
-    instructionLangEl.value === "ja"
-      ? "作成中…"
-      : instructionLangEl.value === "th"
-        ? "กำลังสร้าง…"
-        : "Writing…";
+    gl === "ja" ? "作成中…" : gl === "th" ? "กำลังสร้าง…" : "Writing…";
   convoOutcomeText.textContent = loading;
   try {
     const data = await fetchJson("/api/outcome", {
@@ -797,7 +832,7 @@ async function fetchCallOutcome() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         goal: goalEl.value.trim() || "(none)",
-        language: instructionLangEl.value,
+        language: goalInstructionLang(),
         turns: convoTurns,
       }),
     });
@@ -808,9 +843,9 @@ async function fetchCallOutcome() {
     outcomeFromApi = false;
     convoOutcome.classList.add("waiting");
     convoOutcomeText.textContent =
-      (instructionLangEl.value === "ja"
+      (goalInstructionLang() === "ja"
         ? "結果を取得できませんでした: "
-        : instructionLangEl.value === "th"
+        : goalInstructionLang() === "th"
           ? "สรุปไม่สำเร็จ: "
           : "Could not get outcome: ") + e.message;
     showError(
@@ -1245,6 +1280,7 @@ async function startGoalDictate() {
       if (text.length >= 1) {
         const cur = goalEl.value.trim();
         goalEl.value = cur ? cur + (cur.endsWith(" ") ? "" : " ") + text : text;
+        refreshOutcomeStripIfWaiting();
       }
     } catch (e) {
       showError("指示の音声入力に失敗しました / Instruction dictation failed: " + e.message);
@@ -1461,8 +1497,15 @@ goalDictateBtn.addEventListener("click", () => {
   else startGoalDictate();
 });
 
-callLangEl.addEventListener("change", refreshOutcomeStripIfWaiting);
-instructionLangEl.addEventListener("change", refreshOutcomeStripIfWaiting);
+callLangRow.addEventListener("click", (e) => {
+  const btn = e.target.closest(".lang-btn");
+  if (!btn || !btn.dataset.lang) return;
+  setCallLang(btn.dataset.lang);
+});
+
+goalEl.addEventListener("input", () => {
+  refreshOutcomeStripIfWaiting();
+});
 
 resetBtn.addEventListener("click", async () => {
   clearLiveCallTimer();
@@ -1489,10 +1532,7 @@ resetBtn.addEventListener("click", async () => {
 document.addEventListener("touchmove", e => { if (e.target === document.body) e.preventDefault(); }, { passive: false });
 
 updateControlLocks();
-callLangEl.value = ["ja", "en", "th"].includes(callLangEl.value) ? callLangEl.value : "ja";
-instructionLangEl.value = ["ja", "en", "th"].includes(instructionLangEl.value)
-  ? instructionLangEl.value
-  : "en";
+setCallLang(["ja", "en", "th"].includes(callLangEl.value) ? callLangEl.value : "ja");
 syncOutcomeWaitingUI();
 updateIdleMicHint();
 updateControlsHeightVar();
