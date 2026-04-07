@@ -180,6 +180,13 @@
 
   textarea::placeholder { color: var(--dim); }
 
+  .field-note {
+    font-size: 11px;
+    color: var(--dim);
+    margin-top: 6px;
+    line-height: 1.35;
+  }
+
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
   .lang-row {
@@ -395,21 +402,13 @@
           </svg>
         </button>
       </div>
-      <textarea id="goal" placeholder="Type here or tap the mic — stops when quiet, or tap again"></textarea>
+      <textarea id="goal" placeholder="Type or tap the mic — any language; mic auto-detects"></textarea>
+      <p class="field-note">Small mic uses auto language detection. Caller language below is only for the phone call.</p>
     </div>
     <div class="field">
-      <label>Instruction language — dictate / type your goal (e.g. English)</label>
-      <input type="hidden" id="instructionLang" value="en" />
-      <div class="lang-row" id="instructionLangRow" role="group" aria-label="Instruction language">
-        <button type="button" class="lang-btn" data-lang="ja" aria-pressed="false">日本語</button>
-        <button type="button" class="lang-btn" data-lang="th" aria-pressed="false">ไทย</button>
-        <button type="button" class="lang-btn active" data-lang="en" aria-pressed="true">English</button>
-      </div>
-    </div>
-    <div class="field">
-      <label>Call language — what they say on the phone; AI reply &amp; big mic</label>
+      <label>Caller’s language — they speak; big mic &amp; AI reply</label>
       <input type="hidden" id="callLang" value="ja" />
-      <div class="lang-row" id="callLangRow" role="group" aria-label="Call language">
+      <div class="lang-row" id="callLangRow" role="group" aria-label="Caller language">
         <button type="button" class="lang-btn active" data-lang="ja" aria-pressed="true">日本語</button>
         <button type="button" class="lang-btn" data-lang="th" aria-pressed="false">ไทย</button>
         <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">English</button>
@@ -527,19 +526,8 @@ const resetBtn    = document.getElementById("resetBtn");
 const goalEl         = document.getElementById("goal");
 const goalDictateBtn = document.getElementById("goalDictateBtn");
 const toneEl         = document.getElementById("tone");
-const instructionLangEl = document.getElementById("instructionLang");
-const instructionLangRow = document.getElementById("instructionLangRow");
 const callLangEl = document.getElementById("callLang");
 const callLangRow = document.getElementById("callLangRow");
-
-function setInstructionLang(code) {
-  instructionLangEl.value = code;
-  instructionLangRow.querySelectorAll(".lang-btn").forEach((btn) => {
-    const on = btn.dataset.lang === code;
-    btn.classList.toggle("active", on);
-    btn.setAttribute("aria-pressed", on ? "true" : "false");
-  });
-}
 
 function setCallLang(code) {
   callLangEl.value = code;
@@ -946,7 +934,7 @@ async function startGoalDictate() {
     try {
       const fd = new FormData();
       fd.append("audio", blob, "audio." + ext);
-      fd.append("language", instructionLangEl.value);
+      fd.append("language", "auto");
       const data = await fetchJson("/api/transcribe", { method: "POST", body: fd });
       const text = (data.text || "").trim();
       if (text.length >= 1) {
@@ -1129,12 +1117,6 @@ goalDictateBtn.addEventListener("click", () => {
   else startGoalDictate();
 });
 
-instructionLangRow.addEventListener("click", (e) => {
-  const btn = e.target.closest(".lang-btn");
-  if (!btn || !btn.dataset.lang) return;
-  setInstructionLang(btn.dataset.lang);
-});
-
 callLangRow.addEventListener("click", (e) => {
   const btn = e.target.closest(".lang-btn");
   if (!btn || !btn.dataset.lang) return;
@@ -1161,7 +1143,6 @@ resetBtn.addEventListener("click", async () => {
 document.addEventListener("touchmove", e => { if (e.target === document.body) e.preventDefault(); }, { passive: false });
 
 updateControlLocks();
-setInstructionLang(instructionLangEl.value || "en");
 setCallLang(callLangEl.value || "ja");
 
 // Wake speech engine on first touch (helps iOS). Runs in same gesture as mic.
