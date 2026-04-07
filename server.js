@@ -76,7 +76,7 @@ function buildPrompt({ goal, tone, language }) {
 
   return `You are an AI speaking OUT LOUD on a live phone call on behalf of the user.
 
-GOAL: ${goal || "Handle the call professionally."}
+GOAL (the user may write this in English or another language — infer intent; your spoken reply must still follow LANGUAGE below): ${goal || "Handle the call professionally."}
 LANGUAGE: ${lang}
 ${tones[tone] || tones.polite}
 

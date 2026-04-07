@@ -398,9 +398,18 @@
       <textarea id="goal" placeholder="Type here or tap the mic — stops when quiet, or tap again"></textarea>
     </div>
     <div class="field">
-      <label>Language — call, instruction dictation, and AI reply</label>
-      <input type="hidden" id="language" value="ja" />
-      <div class="lang-row" id="langRow" role="group" aria-label="Speaking language">
+      <label>Instruction language — dictate / type your goal (e.g. English)</label>
+      <input type="hidden" id="instructionLang" value="en" />
+      <div class="lang-row" id="instructionLangRow" role="group" aria-label="Instruction language">
+        <button type="button" class="lang-btn" data-lang="ja" aria-pressed="false">日本語</button>
+        <button type="button" class="lang-btn" data-lang="th" aria-pressed="false">ไทย</button>
+        <button type="button" class="lang-btn active" data-lang="en" aria-pressed="true">English</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Call language — what they say on the phone; AI reply &amp; big mic</label>
+      <input type="hidden" id="callLang" value="ja" />
+      <div class="lang-row" id="callLangRow" role="group" aria-label="Call language">
         <button type="button" class="lang-btn active" data-lang="ja" aria-pressed="true">日本語</button>
         <button type="button" class="lang-btn" data-lang="th" aria-pressed="false">ไทย</button>
         <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">English</button>
@@ -518,12 +527,23 @@ const resetBtn    = document.getElementById("resetBtn");
 const goalEl         = document.getElementById("goal");
 const goalDictateBtn = document.getElementById("goalDictateBtn");
 const toneEl         = document.getElementById("tone");
-const langEl         = document.getElementById("language");
-const langRow        = document.getElementById("langRow");
+const instructionLangEl = document.getElementById("instructionLang");
+const instructionLangRow = document.getElementById("instructionLangRow");
+const callLangEl = document.getElementById("callLang");
+const callLangRow = document.getElementById("callLangRow");
 
-function setLang(code) {
-  langEl.value = code;
-  langRow.querySelectorAll(".lang-btn").forEach((btn) => {
+function setInstructionLang(code) {
+  instructionLangEl.value = code;
+  instructionLangRow.querySelectorAll(".lang-btn").forEach((btn) => {
+    const on = btn.dataset.lang === code;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+
+function setCallLang(code) {
+  callLangEl.value = code;
+  callLangRow.querySelectorAll(".lang-btn").forEach((btn) => {
     const on = btn.dataset.lang === code;
     btn.classList.toggle("active", on);
     btn.setAttribute("aria-pressed", on ? "true" : "false");
@@ -926,7 +946,7 @@ async function startGoalDictate() {
     try {
       const fd = new FormData();
       fd.append("audio", blob, "audio." + ext);
-      fd.append("language", langEl.value);
+      fd.append("language", instructionLangEl.value);
       const data = await fetchJson("/api/transcribe", { method: "POST", body: fd });
       const text = (data.text || "").trim();
       if (text.length >= 1) {
@@ -965,7 +985,7 @@ async function pipeline(blob, mimeType, epoch) {
   // 1. Transcribe
   const fd = new FormData();
   fd.append("audio", blob, "audio." + (mimeType && mimeType.includes("mp4") ? "mp4" : "webm"));
-  fd.append("language", langEl.value);
+  fd.append("language", callLangEl.value);
 
   let transcript, detectedLanguage;
   try {
@@ -995,7 +1015,7 @@ async function pipeline(blob, mimeType, epoch) {
         transcript,
         goal: goalEl.value.trim(),
         tone: toneEl.value,
-        language: langEl.value,
+        language: callLangEl.value,
         detectedLanguage,
       },
       epoch,
@@ -1022,7 +1042,7 @@ async function pipeline(blob, mimeType, epoch) {
     return;
   }
   lastResponse = response;
-  lastDetectedLanguage = detectedLanguage || langEl.value || "";
+  lastDetectedLanguage = detectedLanguage || callLangEl.value || "";
   setText(responseEl, response);
 
   // 3. Speak (async — iOS may block TTS until user interacts again)
@@ -1049,7 +1069,7 @@ async function speak(text, detectedLang) {
 
   const utter = new SpeechSynthesisUtterance(t);
 
-  const lang = langEl.value;
+  const lang = callLangEl.value;
   const d = String(detectedLang || "").toLowerCase();
   const isThai = lang === "th" || d === "th" || d === "thai";
   const isJa = lang === "ja" || d === "ja" || d === "japanese";
@@ -1109,10 +1129,16 @@ goalDictateBtn.addEventListener("click", () => {
   else startGoalDictate();
 });
 
-langRow.addEventListener("click", (e) => {
+instructionLangRow.addEventListener("click", (e) => {
   const btn = e.target.closest(".lang-btn");
   if (!btn || !btn.dataset.lang) return;
-  setLang(btn.dataset.lang);
+  setInstructionLang(btn.dataset.lang);
+});
+
+callLangRow.addEventListener("click", (e) => {
+  const btn = e.target.closest(".lang-btn");
+  if (!btn || !btn.dataset.lang) return;
+  setCallLang(btn.dataset.lang);
 });
 
 resetBtn.addEventListener("click", async () => {
@@ -1133,7 +1159,8 @@ resetBtn.addEventListener("click", async () => {
 document.addEventListener("touchmove", e => { if (e.target === document.body) e.preventDefault(); }, { passive: false });
 
 updateControlLocks();
-setLang(langEl.value || "ja");
+setInstructionLang(instructionLangEl.value || "en");
+setCallLang(callLangEl.value || "ja");
 
 // Wake speech engine on first touch (helps iOS). Runs in same gesture as mic.
 ["touchstart", "pointerdown"].forEach((ev) => {
