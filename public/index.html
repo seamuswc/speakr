@@ -256,6 +256,10 @@
 
   .placeholder { color: var(--dim); font-size: 13px; }
 
+  .pipeline-sink {
+    display: none !important;
+  }
+
   /* ── Conversation log + outcome ── */
   .convo-body {
     padding: 0;
@@ -506,20 +510,10 @@
   <!-- Error -->
   <div class="error" id="error"></div>
 
-  <!-- They said -->
-  <div class="card">
-    <div class="card-label">相手の発言 / They said</div>
-    <div class="card-body" id="transcript">
-      <span class="placeholder">文字起こしがここに表示されます / Transcript appears here…</span>
-    </div>
-  </div>
-
-  <!-- AI response -->
-  <div class="card">
-    <div class="card-label">AIの返答 / AI response</div>
-    <div class="card-body response" id="response">
-      <span class="placeholder">返答がここに表示されます / Response appears here…</span>
-    </div>
+  <!-- Hidden targets for pipeline + streaming (visible UI is 会話の記録 only) -->
+  <div class="pipeline-sink" aria-hidden="true">
+    <div id="transcript"></div>
+    <div id="response"></div>
   </div>
 
   <!-- Running conversation + latest outcome -->
