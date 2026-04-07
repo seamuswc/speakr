@@ -182,6 +182,34 @@
 
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
+  .lang-row {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+  }
+  .lang-btn {
+    flex: 1;
+    min-width: 0;
+    padding: 10px 8px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: #1a1a1a;
+    color: var(--mid);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    outline: none;
+    -webkit-appearance: none;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+  }
+  .lang-btn:active { opacity: 0.85; }
+  .lang-btn.active {
+    border-color: var(--green);
+    background: var(--green-glow);
+    color: var(--green);
+  }
+
   select {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
@@ -334,15 +362,6 @@
 
   .btn:active { opacity: 0.6; }
 
-  .btn.replay-pulse {
-    animation: replayPulse 1s ease-in-out 3;
-    border-color: var(--green);
-    color: var(--green);
-  }
-  @keyframes replayPulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0.35); }
-    50% { box-shadow: 0 0 14px 3px rgba(34,197,94,0.25); }
-  }
 </style>
 </head>
 <body>
@@ -367,7 +386,7 @@
     <div class="field">
       <div class="field-head">
         <label for="goal">Instruction / Goal</label>
-        <button type="button" class="dictate-btn" id="goalDictateBtn" title="Tap to speak your instruction" aria-label="Speak instruction" aria-pressed="false">
+        <button type="button" class="dictate-btn" id="goalDictateBtn" title="Speak your instruction — stops when quiet, or tap again" aria-label="Speak instruction" aria-pressed="false">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <rect x="9" y="2" width="6" height="12" rx="3"/>
             <path d="M5 10a7 7 0 0 0 14 0"/>
@@ -376,27 +395,25 @@
           </svg>
         </button>
       </div>
-      <textarea id="goal" placeholder="Type here or tap the mic to dictate…"></textarea>
+      <textarea id="goal" placeholder="Type here or tap the mic — stops when quiet, or tap again"></textarea>
     </div>
-    <div class="row">
-      <div class="field">
-        <label>Tone</label>
-        <select id="tone">
-          <option value="polite">Polite</option>
-          <option value="formal">Formal</option>
-          <option value="assertive">Assertive</option>
-          <option value="casual">Casual</option>
-        </select>
+    <div class="field">
+      <label>Language — call, instruction dictation, and AI reply</label>
+      <input type="hidden" id="language" value="ja" />
+      <div class="lang-row" id="langRow" role="group" aria-label="Speaking language">
+        <button type="button" class="lang-btn active" data-lang="ja" aria-pressed="true">日本語</button>
+        <button type="button" class="lang-btn" data-lang="th" aria-pressed="false">ไทย</button>
+        <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">English</button>
       </div>
-      <div class="field">
-        <label>Language</label>
-        <select id="language">
-          <option value="ja">Japanese</option>
-          <option value="en">English</option>
-          <option value="th">Thai</option>
-          <option value="auto">Auto</option>
-        </select>
-      </div>
+    </div>
+    <div class="field">
+      <label>Tone</label>
+      <select id="tone">
+        <option value="polite">Polite</option>
+        <option value="formal">Formal</option>
+        <option value="assertive">Assertive</option>
+        <option value="casual">Casual</option>
+      </select>
     </div>
   </div>
 
@@ -438,7 +455,6 @@
   <div class="mic-hint" id="micHint">Tap to listen</div>
 
   <div class="btn-row">
-    <button class="btn" id="replayBtn">🔊 Hear</button>
     <button class="btn" id="resetBtn">↺ Reset</button>
   </div>
 </div>
@@ -472,9 +488,13 @@ let hadSound = false;
 let lastSoundTime = 0;
 let vadFired = false;
 
-const isIOS =
-  /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+/** Goal dictation VAD (same idea as main mic) */
+let goalAnalyserCtx = null;
+let goalAnimFrame = null;
+let goalVadFired = false;
+let goalHadSound = false;
+let goalLastSoundTime = 0;
+let goalRecordStartAt = 0;
 
 // ── DOM ────────────────────────────────────────────────────────────────────────
 const micBtn      = document.getElementById("micBtn");
@@ -485,12 +505,21 @@ const transcriptEl = document.getElementById("transcript");
 const responseEl  = document.getElementById("response");
 const errorEl     = document.getElementById("error");
 const meterFill   = document.getElementById("meter");
-const replayBtn   = document.getElementById("replayBtn");
 const resetBtn    = document.getElementById("resetBtn");
 const goalEl         = document.getElementById("goal");
 const goalDictateBtn = document.getElementById("goalDictateBtn");
 const toneEl         = document.getElementById("tone");
 const langEl         = document.getElementById("language");
+const langRow        = document.getElementById("langRow");
+
+function setLang(code) {
+  langEl.value = code;
+  langRow.querySelectorAll(".lang-btn").forEach((btn) => {
+    const on = btn.dataset.lang === code;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 function setStatus(state, label) {
@@ -681,9 +710,59 @@ function startMeter(s) {
 
 function stopMeter() {
   if (animFrame) cancelAnimationFrame(animFrame);
+  animFrame = null;
   meterFill.style.width = "0%";
   if (analyserCtx) analyserCtx.close().catch(() => {});
   analyserCtx = null;
+}
+
+function stopGoalMeter() {
+  if (goalAnimFrame) cancelAnimationFrame(goalAnimFrame);
+  goalAnimFrame = null;
+  if (goalAnalyserCtx) goalAnalyserCtx.close().catch(() => {});
+  goalAnalyserCtx = null;
+}
+
+function startGoalMeter(s) {
+  goalVadFired = false;
+  goalHadSound = false;
+  goalLastSoundTime = 0;
+  goalRecordStartAt = Date.now();
+
+  goalAnalyserCtx = new AudioContext();
+  const src = goalAnalyserCtx.createMediaStreamSource(s);
+  const goalAnalyser = goalAnalyserCtx.createAnalyser();
+  goalAnalyser.fftSize = 256;
+  src.connect(goalAnalyser);
+  const data = new Uint8Array(goalAnalyser.frequencyBinCount);
+  function tick() {
+    goalAnalyser.getByteFrequencyData(data);
+    const avg = data.reduce((a, b) => a + b, 0) / data.length;
+    if (
+      isGoalDictating &&
+      !goalVadFired &&
+      goalMediaRecorder &&
+      goalMediaRecorder.state === "recording"
+    ) {
+      if (avg > LOUD_THRESH) {
+        goalHadSound = true;
+        goalLastSoundTime = Date.now();
+      }
+      const now = Date.now();
+      if (
+        goalHadSound &&
+        goalLastSoundTime &&
+        now - goalLastSoundTime >= SILENCE_MS &&
+        now - goalRecordStartAt >= MIN_RECORD_MS
+      ) {
+        goalVadFired = true;
+        stopGoalDictate();
+        return;
+      }
+    }
+    goalAnimFrame = requestAnimationFrame(tick);
+  }
+  tick();
 }
 
 // ── Pick best supported audio format ──────────────────────────────────────────
@@ -822,6 +901,7 @@ async function startGoalDictate() {
 
   goalMediaRecorder.ondataavailable = e => { if (e.data.size > 0) goalAudioChunks.push(e.data); };
   goalMediaRecorder.onstop = async () => {
+    stopGoalMeter();
     goalStream.getTracks().forEach(t => t.stop());
     isGoalDictating = false;
     goalDictateBtn.classList.remove("active");
@@ -863,6 +943,7 @@ async function startGoalDictate() {
   isGoalDictating = true;
   goalDictateBtn.classList.add("active");
   goalDictateBtn.setAttribute("aria-pressed", "true");
+  startGoalMeter(goalStream);
   updateControlLocks();
 }
 
@@ -935,24 +1016,16 @@ async function pipeline(blob, mimeType, epoch) {
   lastDetectedLanguage = detectedLanguage || langEl.value || "";
   setText(responseEl, response);
 
-  // 3. Speak (async — iOS often blocks speech unless user later taps Hear)
+  // 3. Speak (async — iOS may block TTS until user interacts again)
   try {
     await speak(response, detectedLanguage);
   } catch (e) {
     showError("Could not speak: " + (e.message || "unknown"));
   }
   resetMic();
-  if (isIOS) {
-    replayBtn.classList.add("replay-pulse");
-    micHint.textContent = "Tap Hear if you didn’t hear the reply";
-    setTimeout(() => replayBtn.classList.remove("replay-pulse"), 4000);
-    setTimeout(() => {
-      if (!isRecording && micHint.textContent.includes("Hear")) micHint.textContent = "Tap to listen";
-    }, 10000);
-  }
 }
 
-// ── TTS — Web Speech API (on-device). iOS often blocks auto-speak after fetch() — use Hear.
+// ── TTS — Web Speech API (on-device). iOS often blocks auto-speak after fetch().
 async function speak(text, detectedLang) {
   if (!window.speechSynthesis) {
     showError("Text-to-speech not supported in this browser.");
@@ -997,13 +1070,13 @@ async function speak(text, detectedLang) {
     };
     utter.onerror = () => {
       setStatus("", "idle");
-      showError("Speech didn’t play — tap Hear (iOS often blocks auto-speak after loading).");
+      showError("Speech didn’t play — tap the screen, then try again (iOS often blocks TTS until you interact).");
       resolve();
     };
     try {
       speechSynthesis.speak(utter);
     } catch (e) {
-      showError("Speech failed — tap Hear.");
+      showError("Speech failed — try tapping the page, then the mic again.");
       resolve();
     }
   });
@@ -1027,8 +1100,10 @@ goalDictateBtn.addEventListener("click", () => {
   else startGoalDictate();
 });
 
-replayBtn.addEventListener("click", () => {
-  if (lastResponse) void speak(lastResponse, lastDetectedLanguage);
+langRow.addEventListener("click", (e) => {
+  const btn = e.target.closest(".lang-btn");
+  if (!btn || !btn.dataset.lang) return;
+  setLang(btn.dataset.lang);
 });
 
 resetBtn.addEventListener("click", async () => {
@@ -1049,6 +1124,7 @@ resetBtn.addEventListener("click", async () => {
 document.addEventListener("touchmove", e => { if (e.target === document.body) e.preventDefault(); }, { passive: false });
 
 updateControlLocks();
+setLang(langEl.value || "ja");
 
 // Wake speech engine on first touch (helps iOS). Runs in same gesture as mic.
 ["touchstart", "pointerdown"].forEach((ev) => {
