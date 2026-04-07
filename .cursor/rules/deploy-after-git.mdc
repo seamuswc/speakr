@@ -1,0 +1,14 @@
+---
+description: After shipping speakr to GitHub, deploy to production droplet
+alwaysApply: true
+---
+
+# Deploy after git (speakr / eigobot)
+
+When you **commit and push** application changes that should be live:
+
+1. From repo root, run **`npm run push:deploy`** instead of `git push` alone. It pushes `main` to `origin`, then runs `scripts/deploy-to-ip.sh` using `deploy/ip.txt`, `OPENAI_API_KEY` from `.env`, and `DOMAIN=eigobot.com` by default.
+
+2. If you already ran **`git push`** in the same session, still run **`npm run push:deploy`** (push is a no-op when up to date) **or** run `DOMAIN=eigobot.com ./scripts/deploy-to-ip.sh "$(tr -d '[:space:]' < deploy/ip.txt)"` with `.env` loaded so the server matches `main`.
+
+Do not end a “ship this” task with only `git push` unless the user explicitly asked not to deploy.

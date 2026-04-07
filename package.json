@@ -8,7 +8,8 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "deploy:do": "bash scripts/setup-digitalocean.sh",
-    "deploy:ip": "bash scripts/deploy-to-ip.sh"
+    "deploy:ip": "bash scripts/deploy-to-ip.sh",
+    "push:deploy": "bash scripts/push-and-deploy.sh"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
