@@ -1143,10 +1143,12 @@ callLangRow.addEventListener("click", (e) => {
 
 resetBtn.addEventListener("click", async () => {
   window.speechSynthesis?.cancel();
+  goalEl.value = "";
   setText(transcriptEl, "");
   setText(responseEl, "");
   lastResponse = "";
   lastDetectedLanguage = "";
+  errorEl.classList.remove("show");
   setStatus("", "idle");
   await fetch("/api/reset", {
     method: "POST",
