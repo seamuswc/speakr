@@ -89,7 +89,7 @@ journalctl -u speakr -f    # app logs
 systemctl restart speakr
 ```
 
-**Health check:** `GET https://your-domain/api/health` or `http://IP:3000/api/health` → `{"ok":true}`.
+**Health check:** `GET https://your-domain/api/health` or `http://YOUR_IP/api/health` (Caddy on :80; app on `127.0.0.1:3000`) → `{"ok":true}`.
 
 ---
 
@@ -114,7 +114,7 @@ This **uploads** the app to `/opt/speakr`, creates **`.env`** on the server with
 Use the URL the script prints:
 
 - **With `DOMAIN`:** `https://your-domain/`  
-- **Without:** `http://DROPLET_IP:3000/` (mic may be blocked on **iOS** until you use HTTPS)
+- **Without a domain:** `http://DROPLET_IP/` (no `:3000` — Caddy proxies port 80 → app). Mic on **iOS** still prefers **HTTPS** with a real domain.
 
 **Important:** For reliable **microphone** access on phones, prefer **HTTPS** (set `DOMAIN` + DNS, or put another reverse proxy with a real certificate in front of the app).
 

@@ -38,11 +38,7 @@ REPO_URL="${REPO_URL:-https://github.com/seamuswc/speakr.git}"
 SSH_KEY_IDS="${SSH_KEY_IDS:-$(doctl compute ssh-key list --format ID --no-header 2>/dev/null | tr '\n' ',' | sed 's/,$//')}"
 [[ -n "$SSH_KEY_IDS" ]] || die "No SSH keys in DigitalOcean. Add one at https://cloud.digitalocean.com/account/security or set SSH_KEY_IDS=id1,id2"
 
-if [[ -n "${DOMAIN:-}" ]]; then
-  HOST_BIND="127.0.0.1"
-else
-  HOST_BIND="0.0.0.0"
-fi
+HOST_BIND="127.0.0.1"
 
 CLOUD_INIT="$(mktemp)"
 trap 'rm -f "$CLOUD_INIT"' EXIT
@@ -105,7 +101,7 @@ ssh "${SSH_OPTS[@]}" "root@${PUBLIC_IP}" bash -s <<'REMOTE'
 set -euo pipefail
 cat >/etc/systemd/system/speakr.service <<'UNIT'
 [Unit]
-Description=Speakr AI call assistant
+Description=eigobot AI call assistant
 After=network-online.target
 Wants=network-online.target
 
@@ -126,28 +122,33 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ufw
 ufw allow OpenSSH
 REMOTE
 
-if [[ -n "${DOMAIN:-}" ]]; then
-  info "Installing Caddy for https://${DOMAIN} …"
-  ssh "${SSH_OPTS[@]}" "root@${PUBLIC_IP}" bash -s <<'REMOTE'
+info "Caddy (ports 80/443) → app on 127.0.0.1:3000…"
+ssh "${SSH_OPTS[@]}" "root@${PUBLIC_IP}" bash -s <<'REMOTE'
 set -euo pipefail
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq caddy
 systemctl enable caddy
 REMOTE
-  ssh "${SSH_OPTS[@]}" "root@${PUBLIC_IP}" "cat > /etc/caddy/Caddyfile" <<EOF
-${DOMAIN} {
-  reverse_proxy 127.0.0.1:3000
-}
-EOF
-  ssh "${SSH_OPTS[@]}" "root@${PUBLIC_IP}" "systemctl restart caddy && ufw allow 80/tcp && ufw allow 443/tcp && ufw --force enable"
-  ok "HTTPS: https://${DOMAIN}/"
-  info "DNS: A record ${DOMAIN} → ${PUBLIC_IP} (required for the certificate)."
-else
-  ssh "${SSH_OPTS[@]}" "root@${PUBLIC_IP}" "ufw allow 3000/tcp && ufw --force enable"
-  ok "HTTP: http://${PUBLIC_IP}:3000/"
+
+CF_TMP="$(mktemp)"
+{
+  echo "http://${PUBLIC_IP} {"
+  echo "	reverse_proxy 127.0.0.1:3000"
+  echo "}"
   echo ""
-  info "iOS Safari usually needs HTTPS for the mic. Use DOMAIN=your.domain next time, or point a domain at this IP and install Caddy."
-fi
+  if [[ -n "${DOMAIN:-}" ]]; then
+    echo "${DOMAIN}, www.${DOMAIN} {"
+    echo "	reverse_proxy 127.0.0.1:3000"
+    echo "}"
+  fi
+} >"$CF_TMP"
+scp "${SSH_OPTS[@]}" "$CF_TMP" "root@${PUBLIC_IP}:/etc/caddy/Caddyfile"
+rm -f "$CF_TMP"
+
+ssh "${SSH_OPTS[@]}" "root@${PUBLIC_IP}" "systemctl restart caddy && ufw allow 80/tcp && ufw allow 443/tcp && ufw delete allow 3000/tcp 2>/dev/null || true && ufw --force enable"
+
+ok "http://${PUBLIC_IP}/  (no :3000)"
+[[ -n "${DOMAIN:-}" ]] && ok "https://${DOMAIN}/  (needs DNS A → ${PUBLIC_IP})" || true
 
 echo ""
 ok "Droplet: ${DROPLET_NAME}  |  IP: ${PUBLIC_IP}"

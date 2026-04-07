@@ -11,7 +11,9 @@
 # Optional:
 #   SSH_USER=ubuntu          # default: root
 #   SSH_IDENTITY=~/.ssh/id_ed25519   # passed to ssh -i
-#   DOMAIN=app.example.com   # installs Caddy + HTTPS; point A record → this IP first
+#   DOMAIN=eigobot.com       # optional; adds HTTPS for that host + www (DNS A → server IP)
+#
+# Caddy listens on :80 / :443 — app stays on 127.0.0.1:3000. Users open http://IP/ (no :3000) or https://domain/
 #
 set -euo pipefail
 
@@ -51,11 +53,8 @@ else
   info "rsync not found; using tar over ssh (install rsync for faster deploys)"
 fi
 
-if [[ -n "${DOMAIN:-}" ]]; then
-  HOST_BIND="127.0.0.1"
-else
-  HOST_BIND="0.0.0.0"
-fi
+# Node binds localhost only; Caddy terminates HTTP(S) on the public interfaces.
+HOST_BIND="127.0.0.1"
 
 info "Checking SSH to ${SSH_USER}@${TARGET}…"
 "${SSH_BASE[@]}" "echo ok" >/dev/null || die "Cannot SSH to ${SSH_USER}@${TARGET}. Fix keys: ssh-copy-id ${SSH_USER}@${TARGET}"
@@ -111,7 +110,7 @@ cd /opt/speakr
 npm install --omit=dev
 cat >/etc/systemd/system/speakr.service <<'UNIT'
 [Unit]
-Description=Speakr AI call assistant
+Description=eigobot AI call assistant
 After=network-online.target
 Wants=network-online.target
 
@@ -132,28 +131,34 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ufw
 ufw allow OpenSSH
 REMOTE
 
-if [[ -n "${DOMAIN:-}" ]]; then
-  info "Caddy + HTTPS for ${DOMAIN}…"
-  "${SSH_BASE[@]}" bash -s <<'REMOTE'
+info "Caddy (ports 80/443) → app on 127.0.0.1:3000…"
+"${SSH_BASE[@]}" bash -s <<REMOTE
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq caddy
 systemctl enable caddy
 REMOTE
-  "${SSH_BASE[@]}" "cat > /etc/caddy/Caddyfile" <<EOF
-${DOMAIN} {
-  reverse_proxy 127.0.0.1:3000
-}
-EOF
-  "${SSH_BASE[@]}" "systemctl restart caddy && ufw allow 80/tcp && ufw allow 443/tcp && ufw --force enable"
-  ok "Live: https://${DOMAIN}/"
-  info "DNS A record ${DOMAIN} → ${TARGET}"
-else
-  "${SSH_BASE[@]}" "ufw allow 3000/tcp && ufw --force enable"
-  ok "Live: http://${TARGET}:3000/"
-  info "For iPhone mic, use DOMAIN=... (HTTPS) next deploy."
-fi
+
+CADDY_TMP="$(mktemp)"
+{
+  echo "http://${TARGET} {"
+  echo "	reverse_proxy 127.0.0.1:3000"
+  echo "}"
+  echo ""
+  if [[ -n "${DOMAIN:-}" ]]; then
+    echo "${DOMAIN}, www.${DOMAIN} {"
+    echo "	reverse_proxy 127.0.0.1:3000"
+    echo "}"
+  fi
+} >"$CADDY_TMP"
+scp "${SSH_OPTS[@]}" "$CADDY_TMP" "${SSH_USER}@${TARGET}:/etc/caddy/Caddyfile"
+rm -f "$CADDY_TMP"
+
+"${SSH_BASE[@]}" "systemctl restart caddy && ufw allow 80/tcp && ufw allow 443/tcp && ufw delete allow 3000/tcp 2>/dev/null || true && ufw --force enable"
+
+ok "http://${TARGET}/  (no :3000)"
+[[ -n "${DOMAIN:-}" ]] && ok "https://${DOMAIN}/  (after DNS A → ${TARGET})" || true
 
 echo ""
 ok "Done."

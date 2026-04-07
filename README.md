@@ -19,7 +19,7 @@ Edit `.env`: set `OPENAI_API_KEY` to a real key from [OpenAI API keys](https://p
 npm start
 ```
 
-Open **http://localhost:3000** in your browser.
+Open **http://localhost:3000** in your browser (production behind Caddy: **http://your-server-ip/** and **https://your-domain/** with no `:3000`).
 
 - **`npm run dev`** — same as `npm start` but restarts the server when `server.js` changes.
 - **Phone on Wi‑Fi:** use your computer’s LAN IP (e.g. `http://192.168.x.x:3000`). **iOS Safari** usually needs **HTTPS** for the mic; deploy to a host with HTTPS or use a tool like `mkcert` locally.
